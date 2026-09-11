@@ -9,7 +9,9 @@
   ],
   "host_permissions": [
     "https://www.google.com/maps/*",
+    "https://www.google.co.jp/maps/*",
     "https://maps.google.com/*",
+    "https://maps.google.co.jp/*",
     "https://www.youtube.com/*"
   ],
   "background": {
@@ -20,7 +22,9 @@
     {
       "matches": [
         "https://www.google.com/maps/*",
-        "https://maps.google.com/*"
+        "https://www.google.co.jp/maps/*",
+        "https://maps.google.com/*",
+        "https://maps.google.co.jp/*"
       ],
       "js": ["content/index.ts"],
       "css": ["content/styles.css"],

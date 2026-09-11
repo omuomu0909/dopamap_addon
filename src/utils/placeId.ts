@@ -35,8 +35,44 @@ export function extractPlaceIdFromUrl(url: string = location.href): string | nul
 
 /**
  * DOM の data-place-id 属性から Place ID を取得する。
- * observer.ts でも同様のロジックを使うが、単体でも使えるようにエクスポート。
  */
 export function extractPlaceIdFromDOM(root: Element = document.body): string | null {
   return root.querySelector('[data-place-id]')?.getAttribute('data-place-id') ?? null
+}
+
+/**
+ * Google Maps の詳細パネルから業態カテゴリ（例: "居酒屋", "ラーメン店"）を抽出する。
+ * Maps の UI では店名(h1) の直下に小テキストで表示される。
+ */
+export function extractCategory(panelEl: Element): string {
+  // button.DkEaL が Maps の業態ボタン（例: "ラーメン屋"、"居酒屋"）
+  // SPAN.DkEaL は "ラベルを追加" などUIテキストなので除外
+  const catEl = panelEl.querySelector('button.DkEaL') ?? null
+  const text = catEl?.textContent?.trim() ?? ''
+  if (!text || text.length > 20) return ''
+  return text
+}
+
+/**
+ * Google Maps の詳細パネルから地域名（市区町村）を抽出する。
+ * 住所テキスト（例: "〒150-0001 東京都渋谷区神宮前1丁目"）から
+ * 都道府県・区・市・町を取り出す。
+ */
+export function extractAreaName(panelEl: Element): string {
+  // 住所っぽいテキストを持つ要素を探す
+  const addressEl = panelEl.querySelector('[data-item-id="address"]')
+    ?? panelEl.querySelector('button[data-item-id*="address"]')
+    ?? Array.from(panelEl.querySelectorAll('button, span, div')).find(
+      el => /〒?\d{3}-?\d{4}|東京|大阪|京都|神奈川|北海道/.test(el.textContent ?? ''),
+    )
+    ?? null
+
+  const text = addressEl?.textContent?.trim() ?? ''
+
+  // 都道府県名だけを返す（「広島」「東京」「大阪」など）
+  // 「東京都」→「東京」、「広島県」→「広島」のように末尾の都道府県字を除去
+  const m = text.match(/(東京|大阪|京都|北海道|[^\s\d〒ー－−\-]{2,4})[都道府県]/)
+  if (m?.[1]) return m[1]
+
+  return ''
 }

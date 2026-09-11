@@ -2,12 +2,13 @@
  * content/videoPlayer.ts
  * フローティング動画プレイヤー。
  * React を使わず純粋な DOM 操作で実装。
- * 現行 WebApp の VideoModal.tsx と同等の機能を持つ。
  */
 
 export interface VideoClip {
   videoId: string
   title: string
+  /** true = 縦長 Shorts、false = 横長通常動画 */
+  isShort: boolean
 }
 
 export class VideoPlayer {
@@ -98,7 +99,7 @@ export class VideoPlayer {
 
     // iframe
     const iframe = document.createElement('iframe')
-    iframe.title = 'YouTube Shorts player'
+    iframe.title = 'YouTube player'
     iframe.setAttribute('frameborder', '0')
     iframe.allowFullscreen = true
     iframe.allow = 'autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope'
@@ -146,7 +147,7 @@ export class VideoPlayer {
     resizeHandle.className = 'mapshort-player-resize'
 
     container.appendChild(inner)
-    container.appendChild(infoEl)  // inner の下に並べる（オーバーレイではない）
+    container.appendChild(infoEl)
     container.appendChild(resizeHandle)
 
     return { container, iframe, infoEl, navPrev, navNext, videoTitleEl, counterEl }
@@ -165,6 +166,12 @@ export class VideoPlayer {
     this.counterEl.textContent = `${idx + 1} / ${this.videos.length}`
     this.navPrev.disabled = idx === 0
     this.navNext.disabled = idx === this.videos.length - 1
+
+    // 縦長 / 横長で iframe の aspect-ratio を切り替え
+    const inner = this.container.querySelector('.mapshort-player-inner') as HTMLElement | null
+    if (inner) {
+      inner.dataset.orientation = video.isShort ? 'portrait' : 'landscape'
+    }
   }
 
   destroy(): void {
@@ -181,7 +188,6 @@ export class VideoPlayer {
     ) as HTMLElement
 
     handle.addEventListener('mousedown', (e: MouseEvent) => {
-      // 閉じるボタンは除外
       if ((e.target as HTMLElement).closest('.mapshort-player-close')) return
       e.preventDefault()
       this.isDragging = true

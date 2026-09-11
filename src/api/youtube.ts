@@ -1,33 +1,56 @@
 /** YouTube検索ページのytInitialDataから動画IDを抽出する（Data API不使用）。 */
 import { getCache, setCache } from './cache'
-import type { VideoClip } from '../content/videoPlayer'
-import { parseShortsFromHtml } from './youtubeParser'
+import type { SearchResult } from './youtubeParser'
+import { parseVideosFromHtml } from './youtubeParser'
 
-const SEARCH_URL = 'https://www.youtube.com/results?search_query='
-const inFlight = new Map<string, Promise<VideoClip[]>>()
+const inFlight = new Map<string, Promise<SearchResult>>()
 let lastRequestAt = 0
 let queue: Promise<void> = Promise.resolve()
 
-export async function searchShorts(query: string, cacheKey: string, maxResults = 10): Promise<VideoClip[]> {
-  // バージョン番号を上げると既存キャッシュが無効化される
-  const shortsCacheKey = `${cacheKey}:shorts-v3`
-  const cached = getCache<VideoClip[]>('youtube', shortsCacheKey)
+/**
+ * 店名と地域名で YouTube を検索し、Shorts と通常動画を分類して返す。
+ * @param placeName  店名（マッチング判定にも使用）
+ * @param areaName   地域名（市区町など。クエリに付加するだけ）
+ * @param cacheKey   キャッシュキー（placeId または店名）
+ */
+export async function searchVideos(
+  placeName: string,
+  areaName: string,
+  cacheKey: string,
+  maxResults = 10,
+  category = '',
+): Promise<SearchResult> {
+  const key = `${cacheKey}:v7`
+  const cached = getCache<SearchResult>('youtube', key)
   if (cached) return cached
-  const key = JSON.stringify([query, shortsCacheKey, maxResults])
-  const existing = inFlight.get(key)
+
+  const inFlightKey = JSON.stringify([placeName, areaName, key, maxResults, category])
+  const existing = inFlight.get(inFlightKey)
   if (existing) return existing
-  const request = fetchShorts(query, shortsCacheKey, maxResults)
-  inFlight.set(key, request)
-  request.finally(() => inFlight.delete(key)).catch(() => undefined)
+
+  const request = fetchVideos(placeName, areaName, key, maxResults, category)
+  inFlight.set(inFlightKey, request)
+  request.finally(() => inFlight.delete(inFlightKey)).catch(() => undefined)
   return request
 }
 
-async function fetchShorts(query: string, cacheKey: string, maxResults: number): Promise<VideoClip[]> {
+async function fetchVideos(
+  placeName: string,
+  areaName: string,
+  cacheKey: string,
+  maxResults: number,
+  category: string,
+): Promise<SearchResult> {
   await enqueue()
+  // クエリ: 「地域名 店名 カテゴリ」の順で組み立てる
+  const parts = [areaName, placeName, category].filter(Boolean)
+  const query = parts.join(' ')
   const html = await fetchSearchPage(query)
-  const result = parseShortsFromHtml(html, maxResults)
-  // 空結果はキャッシュしない（一時的な取得失敗でキャッシュが汚染されるのを防ぐ）
-  if (result.length > 0) setCache('youtube', cacheKey, result)
+  const result = parseVideosFromHtml(html, placeName, maxResults, areaName, category)
+  // どちらかに1件以上あればキャッシュ
+  if (result.shorts.length > 0 || result.videos.length > 0) {
+    setCache('youtube', cacheKey, result)
+  }
   return result
 }
 

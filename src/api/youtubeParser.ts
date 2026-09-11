@@ -1,53 +1,126 @@
 import type { VideoClip } from '../content/videoPlayer'
 
-export function parseShortsFromHtml(html: string, maxResults = 10): VideoClip[] {
+export interface SearchResult {
+  shorts: VideoClip[]   // 縦長 Shorts（店名マッチあり）
+  videos: VideoClip[]   // 横長通常動画（店名マッチあり）
+  shortsTotal: number   // 店名マッチした Shorts の件数
+  videosTotal: number   // 店名マッチした通常動画の件数
+}
+
+/**
+ * YouTube 検索結果 HTML から VideoClip を抽出し、
+ * 店名でフィルタリングしたうえで Shorts / 通常動画に分類する。
+ */
+export function parseVideosFromHtml(
+  html: string,
+  placeName: string,
+  maxResults = 10,
+  areaName = '',
+  category = '',
+): SearchResult {
   const data = extractInitialData(html)
-  if (!data) return []
+  if (!data) return { shorts: [], videos: [], shortsTotal: 0, videosTotal: 0 }
 
   const seen = new Set<string>()
-  const clips: VideoClip[] = []
+  const allShorts: VideoClip[] = []
+  const allVideos: VideoClip[] = []
 
   walk(data, (value) => {
     if (!isRecord(value)) return
 
-    // 現行形式: shortsLockupViewModel（2024年以降の検索結果）
+    // ① 現行形式: shortsLockupViewModel（2024年以降 = 必ず縦長 Shorts）
     if (isRecord(value.shortsLockupViewModel)) {
       const vm = value.shortsLockupViewModel
       const videoId = extractShortsVideoId(vm)
-      if (videoId && !seen.has(videoId)) {
-        seen.add(videoId)
-        const title = typeof vm.accessibilityText === 'string'
-          ? vm.accessibilityText.split(',')[0].trim()
-          : 'YouTube Shorts'
-        clips.push({ videoId, title })
-      }
+      if (!videoId || seen.has(videoId)) return
+      seen.add(videoId)
+      const title = typeof vm.accessibilityText === 'string'
+        ? vm.accessibilityText.split(',')[0].trim()
+        : 'YouTube Shorts'
+      allShorts.push({ videoId, title, isShort: true })
       return
     }
 
-    // 旧形式: videoRenderer（フォールバック）
+    // ② 旧形式 / 通常動画: videoRenderer
     if (isRecord(value.videoRenderer)) {
       const renderer = value.videoRenderer
       const videoId = typeof renderer.videoId === 'string' ? renderer.videoId : ''
       if (!videoId || seen.has(videoId)) return
-      if (!isVerticalThumbnail(renderer) && !isShortsEndpoint(renderer)) return
       seen.add(videoId)
-      clips.push({ videoId, title: extractText(renderer.title) || 'YouTube Shorts' })
+      const title = extractText(renderer.title) || 'YouTube'
+      const isShort = isVerticalThumbnail(renderer) || isShortsEndpoint(renderer)
+      if (isShort) {
+        allShorts.push({ videoId, title, isShort: true })
+      } else {
+        allVideos.push({ videoId, title, isShort: false })
+      }
     }
   })
 
-  return clips.slice(0, maxResults)
+  // 店名でフィルタリング
+  const matchedShorts = allShorts.filter(v => matchesPlaceName(v.title, placeName, areaName, category))
+  const matchedVideos = allVideos.filter(v => matchesPlaceName(v.title, placeName, areaName, category))
+
+  return {
+    shorts: matchedShorts.slice(0, maxResults),
+    videos: matchedVideos.slice(0, maxResults),
+    shortsTotal: matchedShorts.length,
+    videosTotal: matchedVideos.length,
+  }
 }
 
 /**
- * shortsLockupViewModel から videoId を取得する。
- * パス: onTap.innertubeCommand.reelWatchEndpoint.videoId
+ * 動画タイトルに店名が含まれるか判定する。
+ *
+ * マッチ条件:
+ *   1. タイトルに店名がそのまま含まれる
+ *   2. 末尾の業態語（店・屋・亭など）を除いた語幹が含まれる
+ *
+ * 曖昧語対策:
+ *   店名が短い（正規化後 4文字以下）か一般的なフレーズの場合、
+ *   タイトルに 地域名 OR カテゴリ のどちらかも含まれることを追加要求する。
  */
+function matchesPlaceName(title: string, placeName: string, areaName = '', category = ''): boolean {
+  const normalize = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+      .replace(/[\s\u3000\-－―【】「」『』（）()・、。！!？?]/g, '')
+
+  const normTitle = normalize(title)
+  const normPlace = normalize(placeName)
+
+  // 店名がタイトルに含まれるか（条件1: 完全一致、条件2: 語幹一致）
+  const stem = normPlace.replace(/(店|屋|亭|家|館|堂|処|所|庵|楼|荘|苑|園)$/, '')
+  const nameMatch =
+    normTitle.includes(normPlace) ||
+    (stem.length >= 3 && stem !== normPlace && normTitle.includes(stem))
+
+  if (!nameMatch) return false
+
+  // 店名が短い（4文字以下）場合は地域名 or カテゴリとのAND条件を追加
+  // 「自由気まま」「さくら」など一般語で誤ヒットを防ぐ
+  if (normPlace.length <= 4) {
+    const normArea = normalize(areaName)
+    const normCat = normalize(category)
+    const hasContext =
+      (normArea.length > 0 && normTitle.includes(normArea)) ||
+      (normCat.length > 0 && normTitle.includes(normCat))
+    if (!hasContext) return false
+  }
+
+  return true
+}
+
+// ─────────────────────────────────────────────
+// 内部ユーティリティ
+// ─────────────────────────────────────────────
+
 function extractShortsVideoId(vm: Record<string, unknown>): string | null {
   const onTap = isRecord(vm.onTap) ? vm.onTap : null
   const cmd = onTap && isRecord(onTap.innertubeCommand) ? onTap.innertubeCommand : null
   const reel = cmd && isRecord(cmd.reelWatchEndpoint) ? cmd.reelWatchEndpoint : null
-  const videoId = reel && typeof reel.videoId === 'string' ? reel.videoId : null
-  return videoId
+  return reel && typeof reel.videoId === 'string' ? reel.videoId : null
 }
 
 function isShortsEndpoint(renderer: Record<string, unknown>): boolean {
@@ -63,7 +136,7 @@ function extractInitialData(html: string): unknown | null {
     const jsonStart = start < 0 ? -1 : html.indexOf('{', start + marker.length)
     if (jsonStart < 0) continue
     const json = readObject(html, jsonStart)
-    if (json) { try { return JSON.parse(json) as unknown } catch { /* try next marker */ } }
+    if (json) { try { return JSON.parse(json) as unknown } catch { /* try next */ } }
   }
   return null
 }
