@@ -15,27 +15,39 @@ const maxResultsEl   = document.getElementById('max-results')          as HTMLIn
 const maxResultsVal  = document.getElementById('max-results-value')    as HTMLSpanElement
 const scanIntervalEl = document.getElementById('scan-interval')        as HTMLInputElement
 const scanIntervalVal= document.getElementById('scan-interval-value')  as HTMLSpanElement
+const pollIntervalEl = document.getElementById('poll-interval')        as HTMLInputElement
+const pollIntervalVal= document.getElementById('poll-interval-value')  as HTMLSpanElement
 const extraKeywordEl = document.getElementById('extra-keyword')        as HTMLInputElement
 const saveBtnEl      = document.getElementById('btn-save')             as HTMLButtonElement
 const clearBtnEl     = document.getElementById('btn-clear-cache')      as HTMLButtonElement
 const statusEl       = document.getElementById('status-msg')           as HTMLDivElement
+const themeDarkBtn   = document.getElementById('theme-dark')           as HTMLButtonElement
+const themeLightBtn  = document.getElementById('theme-light')          as HTMLButtonElement
+const presetInput    = document.getElementById('preset-input')         as HTMLInputElement
+const presetAddBtn   = document.getElementById('preset-add-btn')       as HTMLButtonElement
+const presetListEl   = document.getElementById('preset-list')          as HTMLDivElement
 
 // ─────────────────────────────────────────────
 // 初期表示: 保存済みの値を読み込む
 // ─────────────────────────────────────────────
 
 chrome.storage.sync.get(
-  ['enabled', 'autoScan', 'maxResults', 'scanInterval', 'extraKeyword'],
+  ['enabled', 'autoScan', 'maxResults', 'scanInterval', 'pollInterval', 'extraKeyword', 'theme', 'channelPresets'],
   (result) => {
     toggleEl.checked       = result['enabled']   !== false       // デフォルト true
     autoScanEl.checked     = result['autoScan']  !== false       // デフォルト true
     const maxR             = (result['maxResults']   as number) ?? 10
     const scanMs           = (result['scanInterval'] as number) ?? 600
+    const pollMs           = (result['pollInterval'] as number) ?? 500
     maxResultsEl.value     = String(maxR)
     maxResultsVal.textContent = `${maxR} 件`
     scanIntervalEl.value   = String(scanMs)
     scanIntervalVal.textContent = `${scanMs} ms`
+    pollIntervalEl.value   = String(pollMs)
+    pollIntervalVal.textContent = `${pollMs} ms`
     extraKeywordEl.value   = (result['extraKeyword'] as string) ?? ''
+    setActiveTheme((result['theme'] as 'dark' | 'light') ?? 'dark')
+    renderPresets((result['channelPresets'] as string[]) ?? [])
   },
 )
 
@@ -51,9 +63,32 @@ scanIntervalEl.addEventListener('input', () => {
   scanIntervalVal.textContent = `${scanIntervalEl.value} ms`
 })
 
+pollIntervalEl.addEventListener('input', () => {
+  pollIntervalVal.textContent = `${pollIntervalEl.value} ms`
+})
+
 // ─────────────────────────────────────────────
 // トグル変更時: 即座に保存
 // ─────────────────────────────────────────────
+
+// ─────────────────────────────────────────────
+// テーマ選択ボタン
+// ─────────────────────────────────────────────
+
+function setActiveTheme(theme: 'dark' | 'light'): void {
+  themeDarkBtn.classList.toggle('active', theme === 'dark')
+  themeLightBtn.classList.toggle('active', theme === 'light')
+}
+
+themeDarkBtn.addEventListener('click', () => {
+  setActiveTheme('dark')
+  chrome.storage.sync.set({ theme: 'dark' })
+})
+
+themeLightBtn.addEventListener('click', () => {
+  setActiveTheme('light')
+  chrome.storage.sync.set({ theme: 'light' })
+})
 
 toggleEl.addEventListener('change', () => {
   chrome.storage.sync.set({ enabled: toggleEl.checked }, () => {
@@ -75,7 +110,8 @@ saveBtnEl.addEventListener('click', () => {
   const extraKeyword  = extraKeywordEl.value.trim()
   const maxResults    = Number(maxResultsEl.value)
   const scanInterval  = Number(scanIntervalEl.value)
-  chrome.storage.sync.set({ extraKeyword, maxResults, scanInterval }, () => {
+  const pollInterval  = Number(pollIntervalEl.value)
+  chrome.storage.sync.set({ extraKeyword, maxResults, scanInterval, pollInterval }, () => {
     showStatus('保存しました ✓')
   })
 })
@@ -138,3 +174,72 @@ function showStatus(msg: string, isError = false): void {
     statusEl.textContent = ''
   }, 3000)
 }
+
+// ─────────────────────────────────────────────
+// 投稿者プリセット管理
+// ─────────────────────────────────────────────
+
+function renderPresets(presets: string[]): void {
+  presetListEl.innerHTML = ''
+  if (presets.length === 0) {
+    const empty = document.createElement('p')
+    empty.className = 'preset-empty'
+    empty.textContent = '登録済みの投稿者はいません'
+    presetListEl.appendChild(empty)
+    return
+  }
+  for (const name of presets) {
+    const item = document.createElement('div')
+    item.className = 'preset-item'
+
+    const nameEl = document.createElement('span')
+    nameEl.className = 'preset-item__name'
+    nameEl.textContent = name
+    item.appendChild(nameEl)
+
+    const delBtn = document.createElement('button')
+    delBtn.className = 'preset-item__del'
+    delBtn.type = 'button'
+    delBtn.textContent = '✕'
+    delBtn.title = '削除'
+    delBtn.addEventListener('click', () => removePreset(name))
+    item.appendChild(delBtn)
+
+    presetListEl.appendChild(item)
+  }
+}
+
+function getPresets(): Promise<string[]> {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get('channelPresets', (r) => {
+      resolve((r['channelPresets'] as string[]) ?? [])
+    })
+  })
+}
+
+async function addPreset(name: string): Promise<void> {
+  const trimmed = name.trim()
+  if (!trimmed) return
+  const presets = await getPresets()
+  if (presets.includes(trimmed)) return
+  const next = [...presets, trimmed]
+  chrome.storage.sync.set({ channelPresets: next }, () => renderPresets(next))
+}
+
+async function removePreset(name: string): Promise<void> {
+  const presets = await getPresets()
+  const next = presets.filter(p => p !== name)
+  chrome.storage.sync.set({ channelPresets: next }, () => renderPresets(next))
+}
+
+presetAddBtn.addEventListener('click', () => {
+  addPreset(presetInput.value)
+  presetInput.value = ''
+})
+
+presetInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    addPreset(presetInput.value)
+    presetInput.value = ''
+  }
+})

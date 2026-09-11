@@ -17,7 +17,7 @@ import { InfoWindowObserver } from './observer'
 import { SidePanel } from './sidePanel'
 import { searchVideos } from '../api/youtube'
 import { extractAreaName, extractCategory } from '../utils/placeId'
-import { startListScan, stopListScan, hasListRows, isScanning, hasScannedRows } from './listScanner'
+import { startListScan, stopListScan, resetScannedMarks, hasListRows, isScanning, hasScannedRows } from './listScanner'
 
 /** debounce 用タイマー */
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -42,15 +42,21 @@ async function loadSettings(): Promise<{
   autoScan: boolean
   maxResults: number
   scanInterval: number
+  pollInterval: number
+  theme: 'dark' | 'light'
+  channelPresets: string[]
 }> {
   return new Promise((resolve) => {
-    chrome.storage.sync.get(['extraKeyword', 'channelFilter', 'autoScan', 'maxResults', 'scanInterval'], (result) => {
+    chrome.storage.sync.get(['extraKeyword', 'channelFilter', 'autoScan', 'maxResults', 'scanInterval', 'pollInterval', 'theme', 'channelPresets'], (result) => {
       resolve({
         extraKeyword:  (result['extraKeyword']  as string)  ?? '',
         channelFilter: (result['channelFilter'] as import('./sidePanel').ChannelFilter) ?? { text: '', mode: 'partial' },
         autoScan:      result['autoScan']   !== false,
         maxResults:    (result['maxResults']   as number)   ?? 10,
         scanInterval:  (result['scanInterval'] as number)   ?? 600,
+        pollInterval:  (result['pollInterval'] as number)   ?? 500,
+        theme:         (result['theme'] as 'dark' | 'light') ?? 'dark',
+        channelPresets: (result['channelPresets'] as string[]) ?? [],
       })
     })
   })
@@ -63,9 +69,18 @@ async function main(): Promise<void> {
   const panel = new SidePanel()
 
   // storage の初期値をパネルに反映
-  const { extraKeyword: initialKw, channelFilter: initialCf, autoScan: initialAutoScan, maxResults: initialMaxResults, scanInterval: initialScanInterval } = await loadSettings()
+  const { extraKeyword: initialKw, channelFilter: initialCf, autoScan: initialAutoScan, maxResults: initialMaxResults, scanInterval: initialScanInterval, pollInterval: initialPollInterval, theme: initialTheme, channelPresets: initialPresets } = await loadSettings()
   panel.setExtraKeyword(initialKw)
   panel.setChannelFilter(initialCf)
+  panel.setTheme(initialTheme)
+  panel.setChannelPresets(initialPresets)
+
+  // storage の変更を監視してプリセットをリアルタイム更新
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'sync' && changes['channelPresets']) {
+      panel.setChannelPresets((changes['channelPresets'].newValue as string[]) ?? [])
+    }
+  })
 
   // スキャンボタンのコールバックを登録（キーワード・フィルタはその時点のものを使う）
   panel.onScan(
@@ -97,9 +112,6 @@ async function main(): Promise<void> {
 
   const observer = new InfoWindowObserver((name, panelEl) => {
     console.log('[mapshort] onDetect callback:', name)
-    // 詳細パネルが開いたらリストスキャンを停止
-    stopListScan()
-
     // 直前の検索コンテキストを保存（キーワード変更時の再検索用）
     lastSearchContext = { name, panelEl }
 
@@ -120,7 +132,7 @@ async function main(): Promise<void> {
   // 検索結果リスト（居酒屋一覧など）が表示されたら自動スキャン
   // ・初期表示時にリストがすでにあれば即スキャン
   // ・なければ DOM 監視でリスト出現 or 差し替えを検知して自動スキャン
-  watchAndAutoScan(panel, initialAutoScan, initialScanInterval, initialMaxResults)
+  watchAndAutoScan(panel, initialAutoScan, initialScanInterval, initialMaxResults, initialPollInterval)
 }
 
 /**
@@ -138,59 +150,56 @@ async function main(): Promise<void> {
  *   - URL 変化なしでも、リスト行が差し替わった（全消し→新規追加）を
  *     MutationObserver で検知して startListScan を呼ぶ
  */
-function watchAndAutoScan(panel: SidePanel, autoScan = true, scanInterval = 600, maxResults = 10): void {
-  // 初期表示時にリストがすでにあれば即スキャン
+function watchAndAutoScan(panel: SidePanel, autoScan = true, scanInterval = 600, maxResults = 10, pollInterval = 500): void {
+  const panelRootEl = panel.getElement()
+  // 初期表示時にリストがすでにあれば即スキャン（autoScan ON 時のみ）
   if (autoScan && hasListRows()) {
     startListScan(panel, panel.getExtraKeyword(), panel.getChannelFilter(), scanInterval, maxResults)
   }
 
-  // URL ベースの変化検知: pushState / replaceState hook + popstate
+  // URL ポーリング + MutationObserver の二段構えで検索し直しを検知する。
+  //
+  // Google Maps は pushState/replaceState/popstate を使わずに
+  // 独自の方法でナビゲートするケースがあるため、ポーリングで URL を監視する。
+  // MutationObserver はスキャン済み行がない新しいリスト行が出現したときの
+  // バックアップとして機能する。
+
   let lastUrl = location.href
 
-  function onUrlChange(): void {
+  // URL ポーリング（pollInterval ms ごと）
+  setInterval(() => {
     const newUrl = location.href
     if (newUrl === lastUrl) return
     lastUrl = newUrl
-    // URL が変わったらリスト行出現を待って自動スキャン（autoScan ON 時のみ）
-    if (autoScan) waitForListAndScan(panel, scanInterval, maxResults)
-  }
+    const keepNames = panel.getListItemNames()
+    resetScannedMarks()
+    waitForListAndScan(panel, scanInterval, maxResults, keepNames)
+  }, Math.max(10, pollInterval))
 
-  // pushState / replaceState を hook
-  const origPushState = history.pushState.bind(history)
-  const origReplaceState = history.replaceState.bind(history)
-  history.pushState = function (...args) {
-    origPushState(...args)
-    onUrlChange()
-  }
-  history.replaceState = function (...args) {
-    origReplaceState(...args)
-    onUrlChange()
-  }
-  window.addEventListener('popstate', onUrlChange)
+  // popstate も念のため監視
+  window.addEventListener('popstate', () => {
+    const newUrl = location.href
+    if (newUrl === lastUrl) return
+    lastUrl = newUrl
+    const keepNames = panel.getListItemNames()
+    resetScannedMarks()
+    waitForListAndScan(panel, scanInterval, maxResults, keepNames)
+  })
 
-  // MutationObserver でリスト行の出現も直接監視
-  // （URL が変わらないケースや hook が間に合わないケースに備える）
-  //
-  // ガード戦略:
-  //   - スキャン中でも「未スキャン行が Google Maps のリストにある」場合は
-  //     新しい検索結果が来たとみなして再スキャンする
-  //   - サイドパネル側 (msp-list) の DOM 変更はスキャン済みマークが付いた
-  //     行を追加するため、未スキャン行の存在チェックで区別できる
-  if (autoScan) {
+  // MutationObserver: スキャン済み行ゼロの新規リスト行が出たらスキャン
+  // （URL 変化より先にリスト行が現れるケースのバックアップ）
+  {
     let listWatchTimer: ReturnType<typeof setTimeout> | null = null
-    const listWatcher = new MutationObserver(() => {
+    const listWatcher = new MutationObserver((mutations) => {
+      if (mutations.every(m => panelRootEl.contains(m.target as Node))) return
       if (!hasListRows()) return
-      // 「スキャン済み行が 1 件以上ある」= 現在スキャン中 or スキャン完了後の行
-      // その状態でさらに未スキャン行が追加された場合はスクロール追加であり、
-      // listScanner 内の listObserver が担当するためここでは無視する
       if (hasScannedRows()) return
-      // スキャン済み行がゼロ＝全行が新規（URL 変化後の新しい検索結果）のみ対応
       if (isScanning()) return
-      // debounce: DOM が落ち着くまで少し待つ
       if (listWatchTimer !== null) clearTimeout(listWatchTimer)
       listWatchTimer = setTimeout(() => {
         listWatchTimer = null
-        startListScan(panel, panel.getExtraKeyword(), panel.getChannelFilter(), scanInterval, maxResults)
+        const keepNames = panel.getListItemNames()
+        startListScan(panel, panel.getExtraKeyword(), panel.getChannelFilter(), scanInterval, maxResults, keepNames)
       }, 300)
     })
     listWatcher.observe(document.body, { childList: true, subtree: true })
@@ -201,9 +210,9 @@ function watchAndAutoScan(panel: SidePanel, autoScan = true, scanInterval = 600,
  * リスト行が DOM に現れるのを最大 5 秒待って startListScan を呼ぶ。
  * 既にリスト行があれば即スキャン。
  */
-function waitForListAndScan(panel: SidePanel, scanInterval = 600, maxResults = 10): void {
+function waitForListAndScan(panel: SidePanel, scanInterval = 600, maxResults = 10, keepNames?: Set<string>): void {
   if (hasListRows()) {
-    startListScan(panel, panel.getExtraKeyword(), panel.getChannelFilter(), scanInterval, maxResults)
+    startListScan(panel, panel.getExtraKeyword(), panel.getChannelFilter(), scanInterval, maxResults, keepNames)
     return
   }
   let elapsed = 0
@@ -213,7 +222,7 @@ function waitForListAndScan(panel: SidePanel, scanInterval = 600, maxResults = 1
     elapsed += INTERVAL
     if (hasListRows()) {
       clearInterval(timer)
-      startListScan(panel, panel.getExtraKeyword(), panel.getChannelFilter(), scanInterval, maxResults)
+      startListScan(panel, panel.getExtraKeyword(), panel.getChannelFilter(), scanInterval, maxResults, keepNames)
     } else if (elapsed >= MAX_WAIT) {
       clearInterval(timer)
     }

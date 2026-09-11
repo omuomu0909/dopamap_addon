@@ -12,6 +12,7 @@
 
 import { searchVideos } from '../api/youtube'
 import type { SidePanel, ChannelFilter } from './sidePanel'
+import { extractSearchContext } from '../utils/placeId'
 
 /** リスト行セレクタ（DevTools で確認済み） */
 const ROW_SEL = '.Nv2PK'
@@ -26,6 +27,10 @@ let listObserver: MutationObserver | null = null
 /**
  * リストスキャンを開始する。
  * すでに実行中なら停止してから再開する。
+ *
+ * @param keepNames 検索し直し時に引き継ぐ既存リスト行の名前セット。
+ *                  指定した名前の行は新しいリストにも存在すれば削除しない。
+ *                  undefined（デフォルト）はスクロール追加などの通常継続スキャン。
  */
 export function startListScan(
   panel: SidePanel,
@@ -33,13 +38,37 @@ export function startListScan(
   channelFilter: ChannelFilter = { text: '', mode: 'partial' },
   intervalMs = DEFAULT_SCAN_INTERVAL_MS,
   maxResults = 10,
+  keepNames?: Set<string>,
 ): void {
-  stopListScan()
+  // 既存のスキャン処理だけ止める（スキャン済みマークは残す）
+  scanAbortController?.abort()
+  scanAbortController = null
+  listObserver?.disconnect()
+  listObserver = null
 
   const rows = document.querySelectorAll(ROW_SEL)
-  if (rows.length === 0) return
+  if (rows.length === 0) {
+    panel.setScanningState(false)
+    return
+  }
 
-  panel.clearList()
+  if (keepNames !== undefined) {
+    // 検索し直しの場合: 新しいリストに存在する名前だけ引き継ぐ
+    const newNames = new Set(
+      Array.from(rows).map(r => extractNameFromRow(r as HTMLElement)).filter(Boolean) as string[]
+    )
+    const survivingNames = new Set([...keepNames].filter(n => newNames.has(n)))
+    panel.resetListForNewSearch(survivingNames)
+    // 新しいリストのうちすでに引き継ぎ済みの行は「スキャン済み」マークを付けてスキップ対象外にする
+    // ただし実際には未スキャン行としてスキャンし直すため、マークはリセットして再スキャンする
+    resetScannedMarks()
+  } else {
+    // 通常（スクロール追加など）: スキャン済み行があればリストを維持
+    const hasScanned = Array.from(rows).some(el => (el as HTMLElement).dataset.mapshortScanned)
+    if (!hasScanned) {
+      panel.clearList()
+    }
+  }
   panel.setScanningState(true)
 
   const ac = new AbortController()
@@ -79,7 +108,11 @@ export function stopListScan(): void {
   scanAbortController = null
   listObserver?.disconnect()
   listObserver = null
-  // スキャン済みマークを除去（次回スキャン時に再取得できるよう）
+  resetScannedMarks()
+}
+
+/** スキャン済みマークをすべて除去する（新しい検索結果に切り替わったとき用） */
+export function resetScannedMarks(): void {
   document.querySelectorAll(`[data-mapshort-scanned]`).forEach(el => {
     (el as HTMLElement).removeAttribute('data-mapshort-scanned')
   })
@@ -129,10 +162,10 @@ async function runScan(
     if (signal.aborted) return
 
     try {
-      // 投稿者フィルタON時はチャンネル名で絞れるため relaxedMatch 不要。
-      // フィルタなし時は地域名を取れないため relaxedMatch=true で短い店名の AND 条件を緩和する。
-      const relaxedMatch = channelFilter.text.trim().length === 0
-      const result = await searchVideos(name, '', name, maxResults, '', extraKeyword, channelFilter, relaxedMatch)
+      // URL から地域名・カテゴリを取得して詳細画面と同じ検索条件で呼ぶ
+      const { areaName, category } = extractSearchContext()
+      const cacheKey = `${name}:${extraKeyword}:ch:${channelFilter.text}:${channelFilter.mode}`
+      const result = await searchVideos(name, areaName, cacheKey, maxResults, category, extraKeyword, channelFilter)
       if (signal.aborted) return
 
       const { shorts, videos, shortsTotal, videosTotal } = result
