@@ -20,7 +20,6 @@
  */
 
 export type PanelDetectCallback = (
-  placeId: string,
   name: string,
   panelEl: Element,
 ) => void
@@ -82,9 +81,10 @@ export class InfoWindowObserver {
     //   入れ替わる場合は bodyObserver が必要）
 
     // パターン B: aria-label の変化のみ監視（店舗切り替えを検知）
+    // aria-label の値を直接名前として使う（h1 はまだ古い内容の可能性があるため信頼しない）
     this.labelObserver?.disconnect()
     this.labelObserver = new MutationObserver(() => {
-      const name = this.extractName(panel)
+      const name = this.extractNameFromLabel(panel)
       if (name) this.notify(panel, name)
     })
     this.labelObserver.observe(panel, {
@@ -92,8 +92,8 @@ export class InfoWindowObserver {
       attributeFilter: ['aria-label'],
     })
 
-    // 初回通知
-    const name = this.extractName(panel)
+    // 初回通知: aria-label を優先、なければ h1
+    const name = this.extractNameFromLabel(panel) || this.extractName(panel)
     if (name) this.notify(panel, name)
   }
 
@@ -159,15 +159,13 @@ export class InfoWindowObserver {
   // ------------------------------------------------------------------ //
 
   private notify(panel: Element, name: string): void {
-    const placeId = this.extractPlaceIdFromUrl()
-    const key = `${placeId}:${name}`
-    if (key === this.lastKey) {
-      console.log('[mapshort] notify スキップ（重複）:', key)
+    if (name === this.lastKey) {
+      console.log('[mapshort] notify スキップ（重複）:', name)
       return
     }
-    this.lastKey = key
-    console.log('[mapshort] notify:', name, placeId)
-    this.onDetect(placeId ?? '', name, panel)
+    this.lastKey = name
+    console.log('[mapshort] notify:', name)
+    this.onDetect(name, panel)
   }
 
   // ------------------------------------------------------------------ //
@@ -197,15 +195,24 @@ export class InfoWindowObserver {
     return !!el.querySelector('h1')
   }
 
-  private extractPlaceIdFromUrl(): string | null {
-    const m = location.href.match(/!1s([^!]+)!/)
-    if (m) return m[1]
-    try {
-      const u = new URL(location.href)
-      return u.searchParams.get('query_place_id') ?? u.searchParams.get('place_id') ?? null
-    } catch {
-      return null
-    }
+  /**
+   * aria-label から接尾語を除去して純粋な店舗名を返す。
+   * Google Maps の aria-label に付く可能性がある接尾語:
+   *   - " - Google マップ"
+   *   - "（クチコミ N 件）" 等の括弧
+   *   - "の情報"
+   */
+  private extractNameFromLabel(el: Element): string | null {
+    const raw = (el.getAttribute('aria-label') ?? '').trim()
+    if (!raw) return null
+    return raw
+      // " - Google マップ" などのダッシュ以降を除去
+      .replace(/\s*[-－–—]\s*(Google\s*マップ|Google Maps).*/i, '')
+      // "（クチコミ...）" などの括弧部分を除去
+      .replace(/[（(][^）)]*[）)]/g, '')
+      // "の情報" などの末尾接尾語を除去
+      .replace(/の情報$/, '')
+      .trim() || null
   }
 
   private extractName(el: Element): string | null {

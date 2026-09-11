@@ -3,22 +3,25 @@
  * maps.google.com に注入されるエントリーポイント。
  *
  * 設計:
- *   - InfoWindowObserver は「店舗が変わった」ときだけ onDetect を呼ぶ
- *   - onDetect では前のボタンを除去してから新しいボタンを注入する
- *   - ボタンクリック時のみ YouTube API を呼び出す（自動呼び出しなし）
+ *   - SidePanel を生成して右端に固定表示
+ *   - InfoWindowObserver が店舗変化を通知する
+ *   - 通知が来たら SidePanel を「読み込み中」状態にリセット
+ *   - 300ms debounce: 連打中は検索せず、止まったら最新店舗だけ検索
+ *   - 検索完了後に SidePanel を「件数ボタン」状態に更新
+ *   - スキャンボタンで listScanner を起動／停止
  */
 
 import { clearAllCache } from '../api/cache'
 import { InfoWindowObserver } from './observer'
-import { injectShortsButton } from './infoWindowInjector'
-import { VideoPlayer } from './videoPlayer'
-import { searchShorts } from '../api/youtube'
-import { buildYouTubeQuery, buildFallbackQuery } from '../utils/genre'
-import { extractPlaceIdFromUrl } from '../utils/placeId'
+import { SidePanel } from './sidePanel'
+import { searchVideos } from '../api/youtube'
+import { extractAreaName, extractCategory } from '../utils/placeId'
+import { startListScan, stopListScan, hasListRows } from './listScanner'
 
-let currentPlayer: VideoPlayer | null = null
-/** 直前に注入したボタンのクリーンアップ関数 */
-let cleanupButton: (() => void) | null = null
+/** debounce 用タイマー */
+let debounceTimer: ReturnType<typeof setTimeout> | null = null
+/** 進行中の検索を識別するシーケンス番号（グローバル単調増加） */
+let searchSeq = 0
 
 /** 拡張が有効かどうかを確認 */
 async function isEnabled(): Promise<boolean> {
@@ -33,107 +36,83 @@ async function isEnabled(): Promise<boolean> {
 async function main(): Promise<void> {
   if (!(await isEnabled())) return
 
-  const observer = new InfoWindowObserver((placeId, name, panelEl) => {
-    // 前の店舗のボタンを除去
-    cleanupButton?.()
-    cleanupButton = null
+  const panel = new SidePanel()
 
-    // 新しい店舗のボタンを注入
-    // onClick はこのクロージャで placeId/name を閉じ込める
-    cleanupButton = injectShortsButton(panelEl, async () => {
-      // 既存プレイヤーを閉じる
-      currentPlayer?.destroy()
-      currentPlayer = null
+  // スキャンボタンのコールバックを登録
+  panel.onScan(
+    () => startListScan(panel),
+    () => stopListScan(),
+  )
 
-      const resolvedPlaceId = placeId || extractPlaceIdFromUrl() || ''
-      const cacheKey = resolvedPlaceId || name
-      const query = resolvedPlaceId ? buildYouTubeQuery(name) : buildFallbackQuery(name)
+  const observer = new InfoWindowObserver((name, panelEl) => {
+    // 詳細パネルが開いたらリストスキャンを停止
+    stopListScan()
 
-      const loadingEl = createLoadingEl(name, panelEl)
-      document.body.appendChild(loadingEl)
+    panel.destroyPlayer()
 
-      try {
-        const videos = await searchShorts(query, cacheKey)
-        loadingEl.remove()
-        if (videos.length === 0) {
-          showError(name, '動画が見つかりませんでした', panelEl)
-          return
-        }
-        currentPlayer = new VideoPlayer(videos, name, panelEl)
-      } catch (err) {
-        loadingEl.remove()
-        const msg = err instanceof Error ? err.message : '動画の取得に失敗しました'
-        showError(name, msg, panelEl)
-      }
-    })
+    // ① 即座にサイドパネルを「読み込み中」に更新
+    panel.setCurrentPlace({ status: 'loading', name })
+
+    // ② debounce: 連打中はタイマーをリセットし続け、止まったら検索
+    if (debounceTimer !== null) clearTimeout(debounceTimer)
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null
+      startSearch(name, panelEl, panel)
+    }, 300)
   })
 
   observer.start()
+
+  // 検索結果リスト（居酒屋一覧など）が表示されているときにスキャンボタンを有効化
+  // （ユーザーがボタンを押したときに startListScan を呼ぶ）
+  // 初期表示時にリストがすでにあればスキャンを自動開始
+  if (hasListRows()) {
+    startListScan(panel)
+  } else {
+    const listWatcher = new MutationObserver(() => {
+      if (hasListRows()) {
+        listWatcher.disconnect()
+        // リストが現れたら自動スキャン
+        startListScan(panel)
+      }
+    })
+    listWatcher.observe(document.body, { childList: true, subtree: true })
+  }
 }
 
-function createLoadingEl(name: string, panelEl?: Element): HTMLElement {
-  const el = document.createElement('div')
-  el.className = 'mapshort-player'
-  el.style.cssText = playerPosition(panelEl)
-  el.innerHTML = `
-    <div class="mapshort-player-inner">
-      <div class="mapshort-player-drag-handle">
-        <span class="mapshort-player-title-bar">${escapeHtml(name)}</span>
-      </div>
-      <div class="mapshort-player-loading">読み込み中…</div>
-    </div>
-  `
-  return el
-}
+/** debounce 後に実際の検索を行う */
+async function startSearch(
+  name: string,
+  panelEl: Element,
+  panel: SidePanel,
+): Promise<void> {
+  const seq = ++searchSeq
 
-function showError(name: string, message: string, panelEl?: Element): void {
-  const el = document.createElement('div')
-  el.className = 'mapshort-player'
-  el.style.cssText = playerPosition(panelEl)
+  const cacheKey = name
+  const areaName = extractAreaName(panelEl)
+  const category = extractCategory(panelEl)
+  const query = [areaName, name, category].filter(Boolean).join(' ')
 
-  const closeBtn = document.createElement('button')
-  closeBtn.className = 'mapshort-player-close'
-  closeBtn.type = 'button'
-  closeBtn.textContent = '✕'
-  closeBtn.style.cssText = 'position:absolute;top:8px;right:8px;z-index:1;'
-  closeBtn.addEventListener('click', () => el.remove())
+  let result
+  try {
+    result = await searchVideos(name, areaName, cacheKey, 10, category)
+  } catch (err) {
+    if (seq !== searchSeq) return
+    const msg = err instanceof Error ? err.message : '動画の取得に失敗しました'
+    panel.setCurrentPlace({ status: 'error', name, message: msg, query })
+    return
+  }
 
-  el.innerHTML = `
-    <div class="mapshort-player-inner">
-      <div class="mapshort-player-drag-handle">
-        <span class="mapshort-player-title-bar">${escapeHtml(name)}</span>
-      </div>
-      <div class="mapshort-player-error">
-        <span>⚠️</span>
-        <span>${escapeHtml(message)}</span>
-      </div>
-    </div>
-  `
-  el.appendChild(closeBtn)
-  document.body.appendChild(el)
-  setTimeout(() => el.remove(), 5000)
-}
+  if (seq !== searchSeq) return
 
-function playerPosition(panelEl?: Element): string {
-  const rect = panelEl?.getBoundingClientRect()
-  const width = 420
-  const rightCandidate = rect ? rect.right + 16 : window.innerWidth - width - 16
-  const leftCandidate = rect ? rect.left - width - 16 : rightCandidate
-  const left = rect && rightCandidate + width <= window.innerWidth
-    ? rightCandidate
-    : rect && leftCandidate >= 12
-      ? leftCandidate
-      : window.innerWidth - width - 16
-  const top = rect ? Math.max(12, rect.top) : 16
-  return `top:${top}px;left:${Math.max(12, left)}px;width:${width}px;`
-}
+  const { shorts, videos, shortsTotal, videosTotal } = result
 
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+  if (shortsTotal === 0 && videosTotal === 0) {
+    panel.setCurrentPlace({ status: 'empty', name, query })
+    return
+  }
+
+  panel.setCurrentPlace({ status: 'ready', name, shorts, videos, shortsTotal, videosTotal, query })
 }
 
 chrome.runtime.onMessage.addListener((message) => {

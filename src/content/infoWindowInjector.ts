@@ -1,73 +1,105 @@
 /**
  * content/infoWindowInjector.ts
- * Google Maps のサイドパネルに「▶ ショート動画」ボタンを注入する。
+ * 画面固定バー（mapshort-bar）を管理する。
  *
- * 責務:
- *   - パネルにボタンがなければ追加する
- *   - すでにボタンがある場合は何もしない（onClick は同じ店舗のまま有効）
- *   - クリーンアップ関数を返す
+ * Google Maps のパネル要素（panelEl）には一切注入しない。
+ * 独立した固定コンテナを document.body に1つだけ持ち、
+ * 店舗切替のたびに内容を上書きする。
+ * これにより panelEl の使い回し・非同期競合を完全に回避する。
  */
 
-export function injectShortsButton(
-  panelEl: Element,
-  onClick: () => void | Promise<void>,
-): () => void {
-  // すでに注入済みなら何もしない（多重注入・ループ防止）
-  if (panelEl.querySelector('.mapshort-btn')) return () => {}
+import type { VideoClip } from './videoPlayer'
 
-  const btn = document.createElement('button')
-  btn.className = 'mapshort-btn'
-  btn.type = 'button'
-  btn.innerHTML = `
-    <span class="mapshort-btn-icon">▶</span>
-    <span class="mapshort-btn-label">ショート動画</span>
-  `
-  let isLoading = false
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation()
-    if (isLoading) return
+export type BarContent =
+  | { status: 'loading'; placeName: string }
+  | {
+      status: 'ready'
+      placeName: string
+      shorts: VideoClip[]
+      videos: VideoClip[]
+      shortsTotal: number
+      videosTotal: number
+      onClickShorts: () => void
+      onClickVideos: () => void
+    }
+  | { status: 'error'; placeName: string; message: string }
+  | { status: 'empty' }
 
-    isLoading = true
-    btn.disabled = true
-    btn.classList.add('mapshort-btn-loading')
-    const label = btn.querySelector('.mapshort-btn-label')
-    if (label) label.textContent = '読み込み中…'
+const BAR_ID = 'mapshort-bar'
 
-    // Promise 化して同期・非同期どちらのコールバックでも、完了時に再試行可能にする。
-    Promise.resolve(onClick()).finally(() => {
-      isLoading = false
-      btn.disabled = false
-      btn.classList.remove('mapshort-btn-loading')
-      if (label) label.textContent = 'ショート動画'
-    }).catch(() => undefined)
-  })
-
-  const actionBar = findActionBar(panelEl)
-  if (actionBar) {
-    actionBar.appendChild(btn)
-  } else {
-    const h1 = panelEl.querySelector('h1')
-    const insertTarget = h1?.parentElement ?? panelEl
-    insertTarget.appendChild(btn)
+/** 固定バーを取得または作成する */
+function getOrCreateBar(): HTMLElement {
+  let bar = document.getElementById(BAR_ID)
+  if (!bar) {
+    bar = document.createElement('div')
+    bar.id = BAR_ID
+    document.body.appendChild(bar)
   }
-
-  return () => btn.remove()
+  return bar
 }
 
-/**
- * アクションボタン行（ルート・保存・共有 などが並ぶ DIV）を探す。
- */
-function findActionBar(panel: Element): Element | null {
-  // aria-label に「ルート」を含むボタンの祖先で子が 3 つ以上ある DIV
-  const routeBtn = Array.from(panel.querySelectorAll('button[aria-label]')).find((b) =>
-    (b.getAttribute('aria-label') ?? '').includes('ルート'),
-  )
-  if (routeBtn) {
-    let el: Element | null = routeBtn.parentElement
-    for (let i = 0; i < 6 && el; i++) {
-      if (el.children.length >= 3) return el
-      el = el.parentElement
-    }
+/** 固定バーの内容を更新する */
+export function updateBar(content: BarContent): void {
+  const bar = getOrCreateBar()
+  // 子要素をすべて消して作り直す
+  bar.innerHTML = ''
+  bar.className = BAR_ID
+
+  if (content.status === 'empty') {
+    bar.style.display = 'none'
+    return
   }
-  return null
+
+  bar.style.display = ''
+
+  if (content.status === 'loading') {
+    bar.classList.add(`${BAR_ID}--loading`)
+    bar.textContent = `${content.placeName}  動画情報読み込み中…`
+    return
+  }
+
+  if (content.status === 'error') {
+    bar.classList.add(`${BAR_ID}--error`)
+    bar.textContent = `⚠️ ${content.message}`
+    return
+  }
+
+  // status === 'ready'
+  const nameEl = document.createElement('span')
+  nameEl.className = `${BAR_ID}__name`
+  nameEl.textContent = content.placeName
+  bar.appendChild(nameEl)
+
+  if (content.shortsTotal > 0) {
+    bar.appendChild(makeButton(
+      `▶ Shorts (${content.shortsTotal}件)`,
+      `${BAR_ID}__btn ${BAR_ID}__btn--shorts`,
+      content.onClickShorts,
+    ))
+  }
+  if (content.videosTotal > 0) {
+    bar.appendChild(makeButton(
+      `▶ 動画 (${content.videosTotal}件)`,
+      `${BAR_ID}__btn ${BAR_ID}__btn--videos`,
+      content.onClickVideos,
+    ))
+  }
+}
+
+/** 固定バーを非表示にする */
+export function hideBar(): void {
+  const bar = document.getElementById(BAR_ID)
+  if (bar) bar.style.display = 'none'
+}
+
+function makeButton(label: string, className: string, onClick: () => void): HTMLButtonElement {
+  const btn = document.createElement('button')
+  btn.className = className
+  btn.type = 'button'
+  btn.textContent = label
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    onClick()
+  })
+  return btn
 }
