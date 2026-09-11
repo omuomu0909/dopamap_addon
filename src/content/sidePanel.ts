@@ -13,6 +13,12 @@
 import type { VideoClip } from './videoPlayer'
 import { VideoPlayer } from './videoPlayer'
 
+/** 投稿者フィルタ設定 */
+export interface ChannelFilter {
+  text: string
+  mode: 'partial' | 'exact'
+}
+
 export type CurrentPlaceState =
   | { status: 'idle' }
   | { status: 'loading'; name: string; query?: string }
@@ -33,6 +39,9 @@ export interface ListItem {
 
 const PANEL_ID = 'mapshort-side-panel'
 
+/** プレイヤーの位置・サイズ記憶型 */
+type PlayerState = { top: number; left: number; width: number; snapLeft: number | null }
+
 export class SidePanel {
   private el: HTMLElement
   private isOpen = true
@@ -40,15 +49,30 @@ export class SidePanel {
   private currentPlaceEl: HTMLElement
   private listEl: HTMLElement
   private scanBtn: HTMLButtonElement
+  private keywordInput: HTMLInputElement
+  private channelInput: HTMLInputElement
+  private channelModeBtn: HTMLButtonElement
   private onScanRequest: (() => void) | null = null
   private onScanStop: (() => void) | null = null
+  private onKeywordChange: ((kw: string) => void) | null = null
+  private onChannelFilterChange: ((f: ChannelFilter) => void) | null = null
+  private channelFilter: ChannelFilter = { text: '', mode: 'partial' }
   private domWatcher: MutationObserver
+  /** リスト再生ボタンで動画を起動した直後は destroyPlayer を無視する */
+  private keepPlayerUntil = 0
+  /** 縦動画（Shorts）の最終位置・サイズ */
+  private lastStatePortrait: PlayerState | null = null
+  /** 横動画の最終位置・サイズ */
+  private lastStateLandscape: PlayerState | null = null
 
   constructor() {
     this.el = this.createPanelDOM()
     this.currentPlaceEl = this.el.querySelector('.msp-current-place')!
     this.listEl = this.el.querySelector('.msp-list')!
     this.scanBtn = this.el.querySelector('.msp-scan-btn')!
+    this.keywordInput = this.el.querySelector('.msp-keyword-input')!
+    this.channelInput = this.el.querySelector('.msp-channel-input')!
+    this.channelModeBtn = this.el.querySelector('.msp-channel-mode-btn')!
     this.mount()
     // Maps のナビゲーションで body から外れたら即 re-mount する
     // subtree: true で body 自体の置き換えも検知
@@ -79,6 +103,39 @@ export class SidePanel {
   onScan(start: () => void, stop: () => void): void {
     this.onScanRequest = start
     this.onScanStop = stop
+  }
+
+  /** 追加キーワード変更時のコールバックを登録する */
+  onExtraKeyword(cb: (kw: string) => void): void {
+    this.onKeywordChange = cb
+  }
+
+  /** 現在の追加キーワードを返す */
+  getExtraKeyword(): string {
+    return this.keywordInput.value.trim()
+  }
+
+  /** 追加キーワード入力欄の値を外部からセットする */
+  setExtraKeyword(kw: string): void {
+    this.keywordInput.value = kw
+  }
+
+  /** 投稿者フィルタ変更コールバックを登録する */
+  onChannelFilter(cb: (f: ChannelFilter) => void): void {
+    this.onChannelFilterChange = cb
+  }
+
+  /** 現在の投稿者フィルタを返す */
+  getChannelFilter(): ChannelFilter {
+    return { ...this.channelFilter }
+  }
+
+  /** 投稿者フィルタを外部からセットする */
+  setChannelFilter(f: ChannelFilter): void {
+    this.channelFilter = { ...f }
+    this.channelInput.value = f.text
+    this.channelModeBtn.textContent = f.mode === 'exact' ? '完全一致' : '部分一致'
+    this.channelModeBtn.dataset.mode = f.mode
   }
 
   /** 現在の店舗セクションを更新する */
@@ -146,7 +203,7 @@ export class SidePanel {
 
   /** リストをクリアして「スキャン待機」状態にする */
   clearList(): void {
-    this.listEl.innerHTML = '<p class="msp-hint">「リストをスキャン」を押すと\nMaps の一覧から動画を検索します</p>'
+    this.listEl.innerHTML = '<p class="msp-hint">スキャン中…</p>'
     this.scanBtn.textContent = '▶ リストをスキャン'
     this.scanBtn.disabled = false
   }
@@ -177,6 +234,15 @@ export class SidePanel {
   }
 
   destroyPlayer(): void {
+    // リスト再生ボタン直後の猶予期間中は破壊しない
+    if (Date.now() < this.keepPlayerUntil) return
+    // 閉じる前に位置・サイズを向き別に保存
+    if (this.currentPlayer) {
+      const clip = this.currentPlayer.currentClip()
+      const state = this.currentPlayer.getState()
+      if (clip?.isShort) this.lastStatePortrait  = state
+      else               this.lastStateLandscape = state
+    }
     this.currentPlayer?.destroy()
     this.currentPlayer = null
   }
@@ -185,9 +251,26 @@ export class SidePanel {
   // プライベートメソッド
   // ─────────────────────────────────────────────
 
-  private playVideos(clips: VideoClip[], name: string): void {
+  private playVideos(clips: VideoClip[], name: string, fromList = false): void {
+    const firstClip = clips[0]
+
+    // 引き継ぎ優先度:
+    //   1. 現在プレイヤーが生きていて同じ向き → 現プレイヤーの状態
+    //   2. 閉じた後でも向き別の最終状態が保存されていればそれを使う
+    //   3. どちらもなければ初期位置（panelEl 基準）
+    let inheritState: PlayerState | undefined
+    if (this.currentPlayer && firstClip &&
+        this.currentPlayer.currentClip()?.isShort === firstClip.isShort) {
+      inheritState = this.currentPlayer.getState()
+    } else if (firstClip) {
+      inheritState = (firstClip.isShort ? this.lastStatePortrait : this.lastStateLandscape) ?? undefined
+    }
+
     this.currentPlayer?.destroy()
-    this.currentPlayer = new VideoPlayer(clips, name)
+    this.currentPlayer = new VideoPlayer(clips, name, this.el, inheritState)
+
+    // リスト再生ボタン経由の場合、直後の destroyPlayer 呼び出しを 1 秒間ガード
+    if (fromList) this.keepPlayerUntil = Date.now() + 1000
   }
 
   private renderListRow(row: HTMLElement, item: ListItem): void {
@@ -198,7 +281,7 @@ export class SidePanel {
     if (item.mapRow) {
       nameEl.classList.add('msp-list-row__name--clickable')
       nameEl.title = 'Google Maps で開く'
-      nameEl.addEventListener('click', () => item.mapRow!.click())
+      nameEl.addEventListener('click', () => openMapRow(item.mapRow!))
     }
     nameEl.textContent = item.name
     row.appendChild(nameEl)
@@ -220,14 +303,14 @@ export class SidePanel {
       btns.appendChild(this.makeVideoBtn(
         `▶S${item.shortsTotal}`,
         'msp-badge-btn msp-badge-btn--shorts',
-        () => this.playVideos(item.shorts!, item.name),
+        () => { if (item.mapRow) openMapRow(item.mapRow); this.playVideos(item.shorts!, item.name, true) },
       ))
     }
     if ((item.videosTotal ?? 0) > 0) {
       btns.appendChild(this.makeVideoBtn(
         `▶V${item.videosTotal}`,
         'msp-badge-btn msp-badge-btn--videos',
-        () => this.playVideos(item.videos!, item.name),
+        () => { if (item.mapRow) openMapRow(item.mapRow); this.playVideos(item.videos!, item.name, true) },
       ))
     }
     row.appendChild(btns)
@@ -262,6 +345,31 @@ export class SidePanel {
 
       <div class="msp-body">
         <section class="msp-section">
+          <div class="msp-section__label">追加キーワード</div>
+          <input
+            class="msp-keyword-input"
+            type="text"
+            placeholder="例: 食べログ  vlog  行ってみた"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </section>
+
+        <section class="msp-section">
+          <div class="msp-section__label">投稿者フィルタ</div>
+          <div class="msp-channel-row">
+            <input
+              class="msp-channel-input"
+              type="text"
+              placeholder="チャンネル名"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button class="msp-channel-mode-btn" type="button" data-mode="partial">部分一致</button>
+          </div>
+        </section>
+
+        <section class="msp-section">
           <div class="msp-section__label">現在の店舗</div>
           <div class="msp-current-place">
             <p class="msp-hint">店舗をクリックすると動画を検索します</p>
@@ -272,7 +380,7 @@ export class SidePanel {
           <div class="msp-section__label">リストスキャン</div>
           <button class="msp-scan-btn" type="button">▶ リストをスキャン</button>
           <div class="msp-list">
-            <p class="msp-hint">「リストをスキャン」を押すと\nMaps の一覧から動画を検索します</p>
+            <p class="msp-hint">Maps の検索結果が表示されると自動でスキャンします</p>
           </div>
         </section>
       </div>
@@ -281,6 +389,29 @@ export class SidePanel {
     // トグルボタン
     const toggle = panel.querySelector('.msp-header__toggle') as HTMLButtonElement
     toggle.addEventListener('click', () => this.toggleOpen())
+
+    // 追加キーワード入力欄: Enter または blur で確定通知
+    const kwInput = panel.querySelector('.msp-keyword-input') as HTMLInputElement
+    const fireKeyword = () => this.onKeywordChange?.(kwInput.value.trim())
+    kwInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') fireKeyword() })
+    kwInput.addEventListener('blur', fireKeyword)
+
+    // 投稿者フィルタ: Enter / blur で確定、モードボタンでトグル
+    const chInput = panel.querySelector('.msp-channel-input') as HTMLInputElement
+    const chModeBtn = panel.querySelector('.msp-channel-mode-btn') as HTMLButtonElement
+    const fireChannel = () => {
+      this.channelFilter.text = chInput.value.trim()
+      this.onChannelFilterChange?.(this.getChannelFilter())
+    }
+    chInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') fireChannel() })
+    chInput.addEventListener('blur', fireChannel)
+    chModeBtn.addEventListener('click', () => {
+      const next: ChannelFilter['mode'] = this.channelFilter.mode === 'partial' ? 'exact' : 'partial'
+      this.channelFilter.mode = next
+      chModeBtn.textContent = next === 'exact' ? '完全一致' : '部分一致'
+      chModeBtn.dataset.mode = next
+      if (this.channelFilter.text) this.onChannelFilterChange?.(this.getChannelFilter())
+    })
 
     // スキャンボタン
     const scanBtn = panel.querySelector('.msp-scan-btn') as HTMLButtonElement
@@ -309,4 +440,17 @@ export class SidePanel {
       toggle.title = 'パネルを開く'
     }
   }
+}
+
+/**
+ * Google Maps のリスト行（.Nv2PK）をクリックして詳細パネルを開く。
+ *
+ * Maps のリスト行内には店舗詳細へのリンク要素（a.hfpxzc）があり、
+ * それをクリックすることで詳細パネルが開く。
+ * 見つからない場合は行全体をクリックしてフォールバックする。
+ */
+function openMapRow(mapRow: HTMLElement): void {
+  // a.hfpxzc: Google Maps の店舗詳細リンク（検索結果リスト行内）
+  const link = mapRow.querySelector<HTMLElement>('a.hfpxzc') ?? mapRow
+  link.click()
 }

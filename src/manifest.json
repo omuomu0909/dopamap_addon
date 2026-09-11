@@ -5,7 +5,9 @@
   "description": "Google Maps上の飲食店に関連するYouTube Shortsをマップ上で再生します",
   "permissions": [
     "storage",
-    "activeTab"
+    "activeTab",
+    "scripting",
+    "tabs"
   ],
   "host_permissions": [
     "https://www.google.com/maps/*",

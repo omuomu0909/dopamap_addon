@@ -11,14 +11,14 @@
  */
 
 import { searchVideos } from '../api/youtube'
-import type { SidePanel } from './sidePanel'
+import type { SidePanel, ChannelFilter } from './sidePanel'
 
 /** リスト行セレクタ（DevTools で確認済み） */
 const ROW_SEL = '.Nv2PK'
 /** 店舗名を含む要素のセレクタ候補（優先順） */
 const NAME_SEL = ['.qBF1Pd', '.fontHeadlineSmall', 'h3', 'h2']
-/** スキャン間隔（YouTube レート制限 500ms より少し大きめ） */
-const SCAN_INTERVAL_MS = 600
+/** スキャン間隔デフォルト値（ms） */
+const DEFAULT_SCAN_INTERVAL_MS = 600
 
 let scanAbortController: AbortController | null = null
 let listObserver: MutationObserver | null = null
@@ -27,7 +27,13 @@ let listObserver: MutationObserver | null = null
  * リストスキャンを開始する。
  * すでに実行中なら停止してから再開する。
  */
-export function startListScan(panel: SidePanel): void {
+export function startListScan(
+  panel: SidePanel,
+  extraKeyword = '',
+  channelFilter: ChannelFilter = { text: '', mode: 'partial' },
+  intervalMs = DEFAULT_SCAN_INTERVAL_MS,
+  maxResults = 10,
+): void {
   stopListScan()
 
   const rows = document.querySelectorAll(ROW_SEL)
@@ -38,7 +44,7 @@ export function startListScan(panel: SidePanel): void {
 
   const ac = new AbortController()
   scanAbortController = ac
-  runScan(ac.signal, panel).then(() => {
+  runScan(ac.signal, panel, extraKeyword, channelFilter, intervalMs, maxResults).then(() => {
     if (!ac.signal.aborted) panel.setScanningState(false)
   })
 
@@ -46,16 +52,22 @@ export function startListScan(panel: SidePanel): void {
   const listContainer = rows[0].closest('[role="feed"]') ?? rows[0].parentElement
   if (listContainer) {
     listObserver = new MutationObserver(() => {
-      const unscanned = Array.from(listContainer.querySelectorAll(`${ROW_SEL}:not([data-mapshort-scanned])`))
-      if (unscanned.length > 0) {
-        ac.abort()
-        scanAbortController = null
-        const newAc = new AbortController()
-        scanAbortController = newAc
-        runScan(newAc.signal, panel).then(() => {
-          if (!newAc.signal.aborted) panel.setScanningState(false)
-        })
-      }
+      // listContainer 直下に未スキャン行が追加されたときだけ反応する
+      // （サイドパネル側の DOM 変更は listContainer の外なので発火しない）
+      const currentRows = listContainer.querySelectorAll(ROW_SEL)
+      const unscanned = Array.from(currentRows).filter(
+        el => !(el as HTMLElement).dataset.mapshortScanned,
+      )
+      if (unscanned.length === 0) return
+
+      // スキャン中の ac を止めて新しいスキャンを開始
+      ac.abort()
+      scanAbortController = null
+      const newAc = new AbortController()
+      scanAbortController = newAc
+      runScan(newAc.signal, panel, extraKeyword, channelFilter, intervalMs, maxResults).then(() => {
+        if (!newAc.signal.aborted) panel.setScanningState(false)
+      })
     })
     listObserver.observe(listContainer, { childList: true })
   }
@@ -78,7 +90,29 @@ export function hasListRows(): boolean {
   return document.querySelectorAll(ROW_SEL).length > 0
 }
 
-async function runScan(signal: AbortSignal, panel: SidePanel): Promise<void> {
+/** スキャン済みマークのない Google Maps リスト行が存在するかチェック */
+export function hasUnscannedRows(): boolean {
+  return document.querySelectorAll(`${ROW_SEL}:not([data-mapshort-scanned])`).length > 0
+}
+
+/** スキャン済みマークのある Google Maps リスト行が存在するかチェック */
+export function hasScannedRows(): boolean {
+  return document.querySelectorAll(`${ROW_SEL}[data-mapshort-scanned]`).length > 0
+}
+
+/** スキャンが進行中かどうか */
+export function isScanning(): boolean {
+  return scanAbortController !== null
+}
+
+async function runScan(
+  signal: AbortSignal,
+  panel: SidePanel,
+  extraKeyword = '',
+  channelFilter: ChannelFilter = { text: '', mode: 'partial' },
+  intervalMs = DEFAULT_SCAN_INTERVAL_MS,
+  maxResults = 10,
+): Promise<void> {
   const rows = Array.from(document.querySelectorAll(ROW_SEL)) as HTMLElement[]
 
   for (const row of rows) {
@@ -95,7 +129,10 @@ async function runScan(signal: AbortSignal, panel: SidePanel): Promise<void> {
     if (signal.aborted) return
 
     try {
-      const result = await searchVideos(name, '', name)
+      // 投稿者フィルタON時はチャンネル名で絞れるため relaxedMatch 不要。
+      // フィルタなし時は地域名を取れないため relaxedMatch=true で短い店名の AND 条件を緩和する。
+      const relaxedMatch = channelFilter.text.trim().length === 0
+      const result = await searchVideos(name, '', name, maxResults, '', extraKeyword, channelFilter, relaxedMatch)
       if (signal.aborted) return
 
       const { shorts, videos, shortsTotal, videosTotal } = result
@@ -110,7 +147,7 @@ async function runScan(signal: AbortSignal, panel: SidePanel): Promise<void> {
       panel.updateListItem({ name, status: 'empty', mapRow: row })
     }
 
-    await sleep(SCAN_INTERVAL_MS, signal)
+    await sleep(intervalMs, signal)
   }
 }
 

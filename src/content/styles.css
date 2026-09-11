@@ -122,8 +122,7 @@
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   background: #000;
   user-select: none;
-  min-width: 180px;
-  max-width: 600px;
+  min-width: 240px;
   pointer-events: auto;
 }
 
@@ -155,9 +154,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: calc(100% - 60px);
+  flex: 1;
+  min-width: 0;
   font-size: 11px;
   color: #ddd;
+}
+
+.mapshort-player-wheel-hint {
+  font-size: 9px;
+  color: #666;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin: 0 6px;
 }
 
 .mapshort-player-close {
@@ -252,17 +260,6 @@
   color: #bbb;
   text-align: center;
   margin-top: 4px;
-}
-
-/* リサイズハンドル（右端） */
-.mapshort-player-resize {
-  position: absolute;
-  right: -3px;
-  top: 0;
-  bottom: 0;
-  width: 8px;
-  cursor: ew-resize;
-  z-index: 1;
 }
 
 /* ローディング表示 */
@@ -361,6 +358,12 @@
 }
 
 /* ボディ（開いているときのみ表示） */
+/* all:initial でリセットされた box-sizing を子孫に継承させる */
+.msp-body,
+.msp-body * {
+  box-sizing: border-box;
+}
+
 .msp-body {
   overflow-y: auto;
   flex: 1;
@@ -455,6 +458,86 @@
 
 .msp-btn--videos {
   background: #cc0000;
+}
+
+/* 追加キーワード入力欄 */
+.msp-keyword-input {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 5px;
+  color: #eee;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.msp-keyword-input::placeholder {
+  color: #555;
+}
+
+.msp-keyword-input:focus {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* 投稿者フィルタ行 */
+.msp-channel-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.msp-channel-input {
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 5px;
+  color: #eee;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.msp-channel-input::placeholder {
+  color: #555;
+}
+
+.msp-channel-input:focus {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.msp-channel-mode-btn {
+  flex-shrink: 0;
+  padding: 4px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #bbb;
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.msp-channel-mode-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.msp-channel-mode-btn[data-mode="exact"] {
+  border-color: rgba(216, 121, 80, 0.6);
+  color: #d87950;
 }
 
 /* スキャンボタン */

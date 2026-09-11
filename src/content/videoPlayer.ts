@@ -9,6 +9,8 @@ export interface VideoClip {
   title: string
   /** true = 縦長 Shorts、false = 横長通常動画 */
   isShort: boolean
+  /** 投稿者チャンネル名 */
+  channelName?: string
 }
 
 export class VideoPlayer {
@@ -21,30 +23,57 @@ export class VideoPlayer {
   private counterEl: HTMLElement
 
   private videos: VideoClip[]
-  private idx: number = 0
-  private pos = { top: 16, left: Math.max(0, window.innerWidth - 436) }
+  private idx: number = -1
+  private pos = { top: 16, left: Math.max(0, window.innerWidth - 576) }
   private width = 420
+  /** 縦動画のデフォルト幅 */
+  private static readonly WIDTH_PORTRAIT  = 420
+  /** 横動画のデフォルト幅 */
+  private static readonly WIDTH_LANDSCAPE = 960
+  /** パネル左端の X 座標（幅変更時に left を追従させるため保存） */
+  private snapLeft: number | null = null
   private isDragging = false
-  private isResizing = false
   private dragStartX = 0
   private dragStartY = 0
   private dragStartTop = 0
   private dragStartLeft = 0
-  private resizeStartX = 0
-  private resizeStartWidth = 0
+  /** document イベントリスナーの一括解除用 */
+  private listenerAc = new AbortController()
 
-  constructor(videos: VideoClip[], restaurantName: string, panelEl?: Element) {
-    const rect = panelEl?.getBoundingClientRect()
-    if (rect) {
-      this.pos.top = Math.max(12, rect.top)
-      const rightCandidate = rect.right + 16
-      const leftCandidate = rect.left - this.width - 16
-      this.pos.left = rightCandidate + this.width <= window.innerWidth
-        ? rightCandidate
-        : leftCandidate >= 12
-          ? leftCandidate
-          : window.innerWidth - this.width - 12
-      this.pos.left = Math.max(12, this.pos.left)
+  /** 現在の位置・幅スナップショット（引き継ぎ用） */
+  getState(): { top: number; left: number; width: number; snapLeft: number | null } {
+    return { top: this.pos.top, left: this.pos.left, width: this.width, snapLeft: this.snapLeft }
+  }
+
+  /** 現在再生中の動画クリップ */
+  currentClip(): VideoClip | null {
+    return this.idx >= 0 ? (this.videos[this.idx] ?? null) : null
+  }
+
+  constructor(
+    videos: VideoClip[],
+    restaurantName: string,
+    panelEl?: Element,
+    inheritState?: { top: number; left: number; width: number; snapLeft: number | null },
+  ) {
+    if (inheritState) {
+      // 既存プレイヤーの位置・幅を引き継ぐ
+      this.pos.top   = inheritState.top
+      this.pos.left  = inheritState.left
+      this.width     = inheritState.width
+      this.snapLeft  = inheritState.snapLeft
+      // idx を 0 に設定しておくことで play(0) の orientationChanged 判定で
+      // prevVideo = this.videos[0] = 再生しようとする動画自身になり、
+      // 向き変化なしと判定されてサイズがリセットされなくなる
+      this.idx = 0
+    } else {
+      const rect = panelEl?.getBoundingClientRect()
+      if (rect) {
+        // パネルのヘッダーと同じ高さ・パネル左端にぴったり隣接する位置
+        this.snapLeft = rect.left   // 幅変更時も left を追従させるために保存
+        this.pos.top = rect.top
+        this.pos.left = Math.max(0, rect.left - this.width)
+      }
     }
     this.videos = videos
     const { container, iframe, infoEl, navPrev, navNext, videoTitleEl, counterEl } =
@@ -88,6 +117,10 @@ export class VideoPlayer {
     titleBar.className = 'mapshort-player-title-bar'
     titleBar.textContent = restaurantName
 
+    const wheelHint = document.createElement('span')
+    wheelHint.className = 'mapshort-player-wheel-hint'
+    wheelHint.textContent = '↕ スクロールで拡縮'
+
     const closeBtn = document.createElement('button')
     closeBtn.className = 'mapshort-player-close'
     closeBtn.type = 'button'
@@ -95,6 +128,7 @@ export class VideoPlayer {
     closeBtn.addEventListener('click', () => this.destroy())
 
     handle.appendChild(titleBar)
+    handle.appendChild(wheelHint)
     handle.appendChild(closeBtn)
 
     // iframe
@@ -142,13 +176,8 @@ export class VideoPlayer {
     infoEl.appendChild(nav)
     infoEl.appendChild(counterEl)
 
-    // リサイズハンドル
-    const resizeHandle = document.createElement('div')
-    resizeHandle.className = 'mapshort-player-resize'
-
     container.appendChild(inner)
     container.appendChild(infoEl)
-    container.appendChild(resizeHandle)
 
     return { container, iframe, infoEl, navPrev, navNext, videoTitleEl, counterEl }
   }
@@ -159,6 +188,7 @@ export class VideoPlayer {
 
   play(idx: number): void {
     if (idx < 0 || idx >= this.videos.length) return
+    const prevVideo = this.idx >= 0 ? this.videos[this.idx] : null
     this.idx = idx
     const video = this.videos[idx]
     this.iframe.src = `https://www.youtube.com/embed/${encodeURIComponent(video.videoId)}?autoplay=1&rel=0&playsinline=1`
@@ -167,15 +197,35 @@ export class VideoPlayer {
     this.navPrev.disabled = idx === 0
     this.navNext.disabled = idx === this.videos.length - 1
 
-    // 縦長 / 横長で iframe の aspect-ratio を切り替え
+    // 縦長 / 横長で aspect-ratio を切り替え
     const inner = this.container.querySelector('.mapshort-player-inner') as HTMLElement | null
     if (inner) {
       inner.dataset.orientation = video.isShort ? 'portrait' : 'landscape'
     }
+
+    // 向きが変わったときだけデフォルト幅にリセット。
+    // 同じ向きのままなら現在の幅（ユーザーがリサイズした値）を維持する。
+    const orientationChanged = !prevVideo || prevVideo.isShort !== video.isShort
+    if (orientationChanged) {
+      this.setWidth(video.isShort
+        ? VideoPlayer.WIDTH_PORTRAIT
+        : VideoPlayer.WIDTH_LANDSCAPE)
+    }
   }
 
   destroy(): void {
+    this.listenerAc.abort()
     this.container.remove()
+  }
+
+  /** 幅を設定してコンテナに反映する。snapLeft が設定されている場合は left も追従する */
+  private setWidth(w: number): void {
+    this.width = Math.min(window.innerWidth, Math.max(240, w))
+    this.container.style.width = `${this.width}px`
+    if (this.snapLeft !== null) {
+      this.pos.left = Math.max(0, this.snapLeft - this.width)
+      this.container.style.left = `${this.pos.left}px`
+    }
   }
 
   // ─────────────────────────────────────────────
@@ -186,11 +236,13 @@ export class VideoPlayer {
     const handle = this.container.querySelector(
       '.mapshort-player-drag-handle',
     ) as HTMLElement
+    const { signal } = this.listenerAc
 
     handle.addEventListener('mousedown', (e: MouseEvent) => {
       if ((e.target as HTMLElement).closest('.mapshort-player-close')) return
       e.preventDefault()
       this.isDragging = true
+      this.snapLeft = null  // 手動ドラッグ開始でスナップ追従を解除
       this.dragStartX = e.clientX
       this.dragStartY = e.clientY
       this.dragStartTop = this.pos.top
@@ -206,44 +258,31 @@ export class VideoPlayer {
       this.pos.left = Math.max(0, this.dragStartLeft + dx)
       this.container.style.top = `${this.pos.top}px`
       this.container.style.left = `${this.pos.left}px`
-    })
+    }, { signal })
 
     document.addEventListener('mouseup', () => {
       if (this.isDragging) {
         this.isDragging = false
         this.container.classList.remove('dragging')
       }
-    })
+    }, { signal })
   }
 
   // ─────────────────────────────────────────────
-  // リサイズ（右端ドラッグ）
+  // ホイールスクロールでリサイズ
   // ─────────────────────────────────────────────
 
   private setupResize(): void {
-    const resizeHandle = this.container.querySelector(
-      '.mapshort-player-resize',
-    ) as HTMLElement
+    const { signal } = this.listenerAc
+    const STEP = 30   // 1ノッチあたりのピクセル変化量
 
-    resizeHandle.addEventListener('mousedown', (e: MouseEvent) => {
+    this.container.addEventListener('wheel', (e: WheelEvent) => {
+      // プレイヤー上でのスクロールはページスクロールをキャンセルして幅変更に使う
       e.preventDefault()
       e.stopPropagation()
-      this.isResizing = true
-      this.resizeStartX = e.clientX
-      this.resizeStartWidth = this.width
-    })
-
-    document.addEventListener('mousemove', (e: MouseEvent) => {
-      if (!this.isResizing) return
-      const dx = e.clientX - this.resizeStartX
-      this.width = Math.min(600, Math.max(240, this.resizeStartWidth + dx))
-      this.container.style.width = `${this.width}px`
-    })
-
-    document.addEventListener('mouseup', () => {
-      if (this.isResizing) {
-        this.isResizing = false
-      }
-    })
+      // deltaY > 0 = 下スクロール = 縮小、deltaY < 0 = 上スクロール = 拡大
+      const delta = e.deltaY > 0 ? -STEP : STEP
+      this.setWidth(this.width + delta)
+    }, { signal, passive: false })
   }
 }
