@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>mapshort 設定</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 320px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      background: #fafafa;
+      color: #333;
+    }
+
+    .header {
+      background: #d87950;
+      color: white;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .header img {
+      width: 24px;
+      height: 24px;
+    }
+
+    .header h1 {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    .body {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .field label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #555;
+      margin-bottom: 6px;
+    }
+
+    .field input[type="text"],
+    .field input[type="password"] {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .field input:focus {
+      border-color: #d87950;
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .toggle-label {
+      font-size: 13px;
+      color: #444;
+    }
+
+    /* Toggle switch */
+    .toggle {
+      position: relative;
+      width: 40px;
+      height: 22px;
+    }
+
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: #ccc;
+      border-radius: 22px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      left: 3px;
+      top: 3px;
+      background: white;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+
+    .toggle input:checked + .toggle-slider {
+      background: #d87950;
+    }
+
+    .toggle input:checked + .toggle-slider::before {
+      transform: translateX(18px);
+    }
+
+    .btn {
+      padding: 8px 14px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .btn-primary {
+      background: #d87950;
+      color: white;
+      width: 100%;
+    }
+
+    .btn-primary:hover {
+      background: #c06840;
+    }
+
+    .btn-ghost {
+      background: #eee;
+      color: #555;
+      width: 100%;
+    }
+
+    .btn-ghost:hover {
+      background: #e0e0e0;
+    }
+
+    .status-msg {
+      font-size: 12px;
+      text-align: center;
+      min-height: 18px;
+      color: #27ae60;
+    }
+
+    .status-msg.error {
+      color: #e74c3c;
+    }
+
+    .divider {
+      height: 1px;
+      background: #eee;
+    }
+
+    .link {
+      font-size: 11px;
+      color: #888;
+      text-align: center;
+    }
+
+    .link a {
+      color: #d87950;
+      text-decoration: none;
+    }
+
+    .link a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="../icons/icon48.png" alt="mapshort" />
+    <h1>mapshort</h1>
+  </div>
+
+  <div class="body">
+    <!-- 有効/無効トグル -->
+    <div class="toggle-row">
+      <span class="toggle-label">拡張を有効にする</span>
+      <label class="toggle">
+        <input type="checkbox" id="toggle-enabled" />
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- YouTube API キー -->
+    <div class="field">
+      <label for="api-key">YouTube Data API v3 キー</label>
+      <input
+        type="password"
+        id="api-key"
+        placeholder="AIzaSy..."
+        autocomplete="off"
+        spellcheck="false"
+      />
+    </div>
+
+    <button class="btn btn-primary" id="btn-save">保存</button>
+
+    <div class="status-msg" id="status-msg"></div>
+
+    <div class="divider"></div>
+
+    <!-- キャッシュクリア -->
+    <button class="btn btn-ghost" id="btn-clear-cache">キャッシュをクリア</button>
+
+    <div class="link">
+      <a
+        href="https://console.cloud.google.com/apis/credentials"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        APIキーの取得 → Google Cloud Console
+      </a>
+    </div>
+  </div>
+
+  <script src="popup.ts" type="module"></script>
+</body>
+</html>
