@@ -6,9 +6,10 @@
 // インストール時: デフォルト設定を書き込む
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
-    chrome.storage.sync.set({ enabled: true }, () => {
-      console.log('[mapshort] 初回インストール: デフォルト設定を保存しました')
-    })
+    chrome.storage.sync.set(
+      { enabled: true, autoScan: true, maxResults: 10, scanInterval: 600 },
+      () => { console.log('[mapshort] 初回インストール: デフォルト設定を保存しました') },
+    )
   }
 })
 

@@ -2,6 +2,7 @@
 import { getCache, setCache } from './cache'
 import type { SearchResult } from './youtubeParser'
 import { parseVideosFromHtml } from './youtubeParser'
+import type { ChannelFilter } from '../content/sidePanel'
 
 const inFlight = new Map<string, Promise<SearchResult>>()
 let lastRequestAt = 0
@@ -19,16 +20,19 @@ export async function searchVideos(
   cacheKey: string,
   maxResults = 10,
   category = '',
+  extraKeyword = '',
+  channelFilter: ChannelFilter = { text: '', mode: 'partial' },
+  relaxedMatch = false,
 ): Promise<SearchResult> {
-  const key = `${cacheKey}:v7`
+  const key = `${cacheKey}:v7:${extraKeyword}:ch:${channelFilter.text}:${channelFilter.mode}${relaxedMatch ? ':relaxed' : ''}`
   const cached = getCache<SearchResult>('youtube', key)
   if (cached) return cached
 
-  const inFlightKey = JSON.stringify([placeName, areaName, key, maxResults, category])
+  const inFlightKey = JSON.stringify([placeName, areaName, key, maxResults, category, extraKeyword, channelFilter, relaxedMatch])
   const existing = inFlight.get(inFlightKey)
   if (existing) return existing
 
-  const request = fetchVideos(placeName, areaName, key, maxResults, category)
+  const request = fetchVideos(placeName, areaName, key, maxResults, category, extraKeyword, channelFilter, relaxedMatch)
   inFlight.set(inFlightKey, request)
   request.finally(() => inFlight.delete(inFlightKey)).catch(() => undefined)
   return request
@@ -40,13 +44,18 @@ async function fetchVideos(
   cacheKey: string,
   maxResults: number,
   category: string,
+  extraKeyword: string,
+  channelFilter: ChannelFilter,
+  relaxedMatch = false,
 ): Promise<SearchResult> {
   await enqueue()
-  // クエリ: 「地域名 店名 カテゴリ」の順で組み立てる
-  const parts = [areaName, placeName, category].filter(Boolean)
+  // クエリ: 「地域名 店名 カテゴリ 追加キーワード」の順で組み立てる
+  const parts = [areaName, placeName, category, extraKeyword, channelFilter.text.trim()].filter(Boolean)
   const query = parts.join(' ')
+  console.log('[mapshort] fetchVideos: fetching query=', query)
   const html = await fetchSearchPage(query)
-  const result = parseVideosFromHtml(html, placeName, maxResults, areaName, category)
+  console.log('[mapshort] fetchVideos: html length=', html.length, 'hasInitialData=', html.includes('ytInitialData'))
+  const result = parseVideosFromHtml(html, placeName, maxResults, areaName, category, channelFilter, relaxedMatch)
   // どちらかに1件以上あればキャッシュ
   if (result.shorts.length > 0 || result.videos.length > 0) {
     setCache('youtube', cacheKey, result)

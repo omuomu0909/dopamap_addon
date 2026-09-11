@@ -1,4 +1,5 @@
 import type { VideoClip } from '../content/videoPlayer'
+import type { ChannelFilter } from '../content/sidePanel'
 
 export interface SearchResult {
   shorts: VideoClip[]   // 縦長 Shorts（店名マッチあり）
@@ -17,6 +18,9 @@ export function parseVideosFromHtml(
   maxResults = 10,
   areaName = '',
   category = '',
+  channelFilter: ChannelFilter = { text: '', mode: 'partial' },
+  /** true にすると短い店名の「地域名/カテゴリ AND 条件」をスキップする */
+  relaxedMatch = false,
 ): SearchResult {
   const data = extractInitialData(html)
   if (!data) return { shorts: [], videos: [], shortsTotal: 0, videosTotal: 0 }
@@ -37,7 +41,8 @@ export function parseVideosFromHtml(
       const title = typeof vm.accessibilityText === 'string'
         ? vm.accessibilityText.split(',')[0].trim()
         : 'YouTube Shorts'
-      allShorts.push({ videoId, title, isShort: true })
+      const channelName = extractShortsChannelName(vm)
+      allShorts.push({ videoId, title, isShort: true, channelName })
       return
     }
 
@@ -48,18 +53,44 @@ export function parseVideosFromHtml(
       if (!videoId || seen.has(videoId)) return
       seen.add(videoId)
       const title = extractText(renderer.title) || 'YouTube'
+      const channelName = extractText(renderer.ownerText) || extractText(renderer.shortBylineText) || ''
       const isShort = isVerticalThumbnail(renderer) || isShortsEndpoint(renderer)
       if (isShort) {
-        allShorts.push({ videoId, title, isShort: true })
+        allShorts.push({ videoId, title, isShort: true, channelName })
       } else {
-        allVideos.push({ videoId, title, isShort: false })
+        allVideos.push({ videoId, title, isShort: false, channelName })
       }
     }
   })
 
+  // 投稿者フィルタON時は信頼できる投稿者の動画なので店名マッチ条件を緩和する:
+  //   - 短い店名の「地域名/カテゴリ AND 条件」をスキップ
+  //   - 語幹マッチの最小文字数を 3→2 に下げる
+  // relaxedMatch は呼び出し元（listScanner）が地域名なしで呼ぶ場合に渡す
+  const hasChannelFilter = channelFilter.text.trim().length > 0
+  const relaxed = relaxedMatch || hasChannelFilter
+
   // 店名でフィルタリング
-  const matchedShorts = allShorts.filter(v => matchesPlaceName(v.title, placeName, areaName, category))
-  const matchedVideos = allVideos.filter(v => matchesPlaceName(v.title, placeName, areaName, category))
+  const placeShorts = allShorts.filter(v => matchesPlaceName(v.title, placeName, areaName, category, relaxed, hasChannelFilter))
+  const placeVideos = allVideos.filter(v => matchesPlaceName(v.title, placeName, areaName, category, relaxed, hasChannelFilter))
+
+  // 投稿者フィルタ
+  const matchedShorts = applyChannelFilter(placeShorts, channelFilter)
+  const matchedVideos = applyChannelFilter(placeVideos, channelFilter)
+
+  // [DEBUG] 診断ログ（本番では除去）
+  console.debug('[mapshort] parseVideosFromHtml', {
+    placeName, areaName, category, relaxed,
+    channelFilter,
+    allShortsCount: allShorts.length,
+    allVideosCount: allVideos.length,
+    placeShortsCount: placeShorts.length,
+    placeVideosCount: placeVideos.length,
+    matchedShortsCount: matchedShorts.length,
+    matchedVideosCount: matchedVideos.length,
+    allChannels: [...allShorts, ...allVideos].map(v => v.channelName).slice(0, 20),
+    allTitles: [...allShorts, ...allVideos].map(v => v.title).slice(0, 20),
+  })
 
   return {
     shorts: matchedShorts.slice(0, maxResults),
@@ -79,8 +110,20 @@ export function parseVideosFromHtml(
  * 曖昧語対策:
  *   店名が短い（正規化後 4文字以下）か一般的なフレーズの場合、
  *   タイトルに 地域名 OR カテゴリ のどちらかも含まれることを追加要求する。
+ *   ただし relaxed=true の場合はこの AND 条件をスキップする。
+ *
+ * 投稿者フィルタON時（channelFilterActive=true）:
+ *   語幹マッチの最小文字数を 3→2 に緩和する。
+ *   （チャンネル名で絞れているため、短い語幹でも誤ヒットリスクが低い）
  */
-function matchesPlaceName(title: string, placeName: string, areaName = '', category = ''): boolean {
+function matchesPlaceName(
+  title: string,
+  placeName: string,
+  areaName = '',
+  category = '',
+  relaxed = false,
+  channelFilterActive = false,
+): boolean {
   const normalize = (s: string) =>
     s
       .toLowerCase()
@@ -91,16 +134,31 @@ function matchesPlaceName(title: string, placeName: string, areaName = '', categ
   const normPlace = normalize(placeName)
 
   // 店名がタイトルに含まれるか（条件1: 完全一致、条件2: 語幹一致）
+  // 投稿者フィルタON時は語幹の最小文字数を 3→2 に緩和する
+  const minStemLen = channelFilterActive ? 2 : 3
   const stem = normPlace.replace(/(店|屋|亭|家|館|堂|処|所|庵|楼|荘|苑|園)$/, '')
   const nameMatch =
     normTitle.includes(normPlace) ||
-    (stem.length >= 3 && stem !== normPlace && normTitle.includes(stem))
+    (stem.length >= minStemLen && stem !== normPlace && normTitle.includes(stem))
 
-  if (!nameMatch) return false
+  // 投稿者フィルタON時: 店名をスペース区切りトークンに分解して各トークンでもマッチを試みる
+  // 例: "豚麺 アジト" → ["豚麺", "アジト"] のいずれかがタイトルに含まれればOK
+  // ただし2文字以上のトークンのみ対象（1文字は誤ヒットが多すぎる）
+  const tokenMatch = channelFilterActive && !nameMatch &&
+    placeName.split(/[\s\u3000]+/).some(token => {
+      const normToken = normalize(token)
+      if (normToken.length < 2) return false
+      const tokenStem = normToken.replace(/(店|屋|亭|家|館|堂|処|所|庵|楼|荘|苑|園)$/, '')
+      return normTitle.includes(normToken) ||
+        (tokenStem.length >= minStemLen && tokenStem !== normToken && normTitle.includes(tokenStem))
+    })
+
+  if (!nameMatch && !tokenMatch) return false
 
   // 店名が短い（4文字以下）場合は地域名 or カテゴリとのAND条件を追加
   // 「自由気まま」「さくら」など一般語で誤ヒットを防ぐ
-  if (normPlace.length <= 4) {
+  // relaxed=true（投稿者フィルタON or listScanner 呼び出し）の場合はスキップ
+  if (!relaxed && normPlace.length <= 4) {
     const normArea = normalize(areaName)
     const normCat = normalize(category)
     const hasContext =
@@ -115,6 +173,24 @@ function matchesPlaceName(title: string, placeName: string, areaName = '', categ
 // ─────────────────────────────────────────────
 // 内部ユーティリティ
 // ─────────────────────────────────────────────
+
+function extractShortsChannelName(vm: Record<string, unknown>): string {
+  // shortsLockupViewModel の accessibilityText は "タイトル, チャンネル名, ..." の形式
+  if (typeof vm.accessibilityText === 'string') {
+    const parts = vm.accessibilityText.split(',')
+    return parts.length >= 2 ? parts[parts.length - 1].trim() : ''
+  }
+  return ''
+}
+
+function applyChannelFilter(clips: VideoClip[], filter: ChannelFilter): VideoClip[] {
+  if (!filter.text.trim()) return clips
+  const needle = filter.text.trim().toLowerCase()
+  return clips.filter(v => {
+    const ch = (v.channelName ?? '').toLowerCase()
+    return filter.mode === 'exact' ? ch === needle : ch.includes(needle)
+  })
+}
 
 function extractShortsVideoId(vm: Record<string, unknown>): string | null {
   const onTap = isRecord(vm.onTap) ? vm.onTap : null

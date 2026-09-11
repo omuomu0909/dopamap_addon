@@ -50,8 +50,7 @@
       margin-bottom: 6px;
     }
 
-    .field input[type="text"],
-    .field input[type="password"] {
+    .field input[type="text"] {
       width: 100%;
       padding: 8px 10px;
       border: 1px solid #ddd;
@@ -164,19 +163,23 @@
       background: #eee;
     }
 
-    .link {
-      font-size: 11px;
-      color: #888;
-      text-align: center;
+    /* スライダー行 */
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
 
-    .link a {
-      color: #d87950;
-      text-decoration: none;
+    .slider-row input[type="range"] {
+      flex: 1;
+      accent-color: #d87950;
     }
 
-    .link a:hover {
-      text-decoration: underline;
+    .slider-value {
+      font-size: 12px;
+      color: #555;
+      min-width: 44px;
+      text-align: right;
     }
   </style>
   <script type="module" crossorigin src="/popup/popup.js"></script>
@@ -199,13 +202,42 @@
 
     <div class="divider"></div>
 
-    <!-- YouTube API キー -->
+    <!-- 自動スキャン -->
+    <div class="toggle-row">
+      <span class="toggle-label">リスト表示時に自動スキャン</span>
+      <label class="toggle">
+        <input type="checkbox" id="toggle-auto-scan" />
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <!-- 動画の最大表示件数 -->
     <div class="field">
-      <label for="api-key">YouTube Data API v3 キー</label>
+      <label for="max-results">動画の最大表示件数</label>
+      <div class="slider-row">
+        <input type="range" id="max-results" min="1" max="20" step="1" />
+        <span class="slider-value" id="max-results-value">10 件</span>
+      </div>
+    </div>
+
+    <!-- スキャン間隔 -->
+    <div class="field">
+      <label for="scan-interval">スキャン間隔（リスト用）</label>
+      <div class="slider-row">
+        <input type="range" id="scan-interval" min="200" max="2000" step="100" />
+        <span class="slider-value" id="scan-interval-value">600 ms</span>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- 追加キーワード -->
+    <div class="field">
+      <label for="extra-keyword">追加キーワード（任意）</label>
       <input
-        type="password"
-        id="api-key"
-        placeholder="AIzaSy..."
+        type="text"
+        id="extra-keyword"
+        placeholder="例: vlog  食べログ  行ってみた"
         autocomplete="off"
         spellcheck="false"
       />
@@ -219,16 +251,6 @@
 
     <!-- キャッシュクリア -->
     <button class="btn btn-ghost" id="btn-clear-cache">キャッシュをクリア</button>
-
-    <div class="link">
-      <a
-        href="https://console.cloud.google.com/apis/credentials"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        APIキーの取得 → Google Cloud Console
-      </a>
-    </div>
   </div>
 
 </body>
