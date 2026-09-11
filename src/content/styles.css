@@ -1,6 +1,68 @@
 /* mapshort Chrome拡張 — 注入スタイル */
 /* Google Maps の既存スタイルとの衝突を避けるため全クラスに mapshort- プレフィックスを付与 */
 
+/* ===== テーマ変数 ===== */
+
+/* ダークテーマ（デフォルト）— Google Maps ダーク UI に合わせた配色 */
+#mapshort-side-panel {
+  --msp-bg:           #1e1e1e;
+  --msp-bg-header:    #2a2a2a;
+  --msp-bg-input:     rgba(255,255,255,0.08);
+  --msp-bg-input-focus: rgba(255,255,255,0.13);
+  --msp-bg-btn:       rgba(255,255,255,0.12);
+  --msp-bg-btn-hover: rgba(255,255,255,0.22);
+  --msp-border:       rgba(255,255,255,0.08);
+  --msp-border-input: rgba(255,255,255,0.15);
+  --msp-border-input-focus: rgba(255,255,255,0.4);
+  --msp-text:         #f0f0f0;
+  --msp-text-sub:     #aaa;
+  --msp-text-label:   #888;
+  --msp-text-hint:    #666;
+  --msp-text-name:    #ddd;
+  --msp-text-input:   #eee;
+  --msp-text-btn:     #eee;
+  --msp-text-toggle:  #ccc;
+  --msp-text-toggle-hover: #fff;
+  --msp-placeholder:  #555;
+  --msp-row-border:   rgba(255,255,255,0.05);
+  --msp-underline:    rgba(255,255,255,0.3);
+  --msp-underline-hover: rgba(255,255,255,0.7);
+  --msp-shadow:       rgba(0,0,0,0.5);
+  --msp-exact-border: rgba(216,121,80,0.6);
+  --msp-exact-color:  #d87950;
+  --msp-scrollbar-thumb: rgba(255,255,255,0.15);
+}
+
+/* ライトテーマ — Google Maps ライト UI に合わせた配色 */
+#mapshort-side-panel.msp--light {
+  --msp-bg:           #fff;
+  --msp-bg-header:    #f5f5f5;
+  --msp-bg-input:     #f8f8f8;
+  --msp-bg-input-focus: #fff;
+  --msp-bg-btn:       #efefef;
+  --msp-bg-btn-hover: #e2e2e2;
+  --msp-border:       rgba(0,0,0,0.08);
+  --msp-border-input: #ddd;
+  --msp-border-input-focus: #d87950;
+  --msp-text:         #212121;
+  --msp-text-sub:     #555;
+  --msp-text-label:   #777;
+  --msp-text-hint:    #aaa;
+  --msp-text-name:    #333;
+  --msp-text-input:   #222;
+  --msp-text-btn:     #333;
+  --msp-text-toggle:  #555;
+  --msp-text-toggle-hover: #111;
+  --msp-placeholder:  #bbb;
+  --msp-row-border:   rgba(0,0,0,0.06);
+  --msp-underline:    rgba(0,0,0,0.25);
+  --msp-underline-hover: rgba(0,0,0,0.7);
+  --msp-shadow:       rgba(0,0,0,0.18);
+  --msp-exact-border: rgba(216,121,80,0.5);
+  --msp-exact-color:  #c06030;
+  --msp-scrollbar-thumb: rgba(0,0,0,0.15);
+}
+
 /* ===== 固定バー ===== */
 #mapshort-bar {
   position: fixed;
@@ -303,12 +365,12 @@
   max-height: calc(100vh - 80px);
   display: flex !important;
   flex-direction: column;
-  background: rgba(18, 18, 18, 0.97);
-  color: #f0f0f0;
+  background: var(--msp-bg);
+  color: var(--msp-text);
   font-family: sans-serif;
   font-size: 13px;
   border-radius: 10px 0 0 10px;
-  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.5);
+  box-shadow: -4px 0 20px var(--msp-shadow);
   overflow: hidden;
   transition: width 0.2s;
 }
@@ -324,7 +386,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--msp-bg-header);
   flex-shrink: 0;
   cursor: default;
   white-space: nowrap;
@@ -342,10 +404,30 @@
   display: none;
 }
 
+/* テーマ切り替えボタン */
+.msp-theme-btn {
+  background: none;
+  border: none;
+  color: var(--msp-text-toggle);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 2px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.msp-theme-btn:hover {
+  color: var(--msp-text-toggle-hover);
+}
+
+#mapshort-side-panel:not(.msp--open) .msp-theme-btn {
+  display: none;
+}
+
 .msp-header__toggle {
   background: none;
   border: none;
-  color: #ccc;
+  color: var(--msp-text-toggle);
   cursor: pointer;
   font-size: 14px;
   padding: 0 2px;
@@ -354,7 +436,7 @@
 }
 
 .msp-header__toggle:hover {
-  color: #fff;
+  color: var(--msp-text-toggle-hover);
 }
 
 /* ボディ（開いているときのみ表示） */
@@ -371,6 +453,14 @@
   flex-direction: column;
 }
 
+.msp-body::-webkit-scrollbar {
+  width: 4px;
+}
+.msp-body::-webkit-scrollbar-thumb {
+  background: var(--msp-scrollbar-thumb);
+  border-radius: 2px;
+}
+
 #mapshort-side-panel:not(.msp--open) .msp-body {
   display: none;
 }
@@ -378,12 +468,12 @@
 /* セクション */
 .msp-section {
   padding: 10px 10px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--msp-border);
 }
 
 .msp-section__label {
   font-size: 10px;
-  color: #888;
+  color: var(--msp-text-label);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin-bottom: 6px;
@@ -392,7 +482,7 @@
 /* ヒントテキスト */
 .msp-hint {
   margin: 0;
-  color: #777;
+  color: var(--msp-text-hint);
   font-size: 11px;
   line-height: 1.5;
   white-space: pre-line;
@@ -411,18 +501,18 @@
 /* ステータステキスト */
 .msp-status-text {
   font-size: 12px;
-  color: #aaa;
+  color: var(--msp-text-sub);
 }
 
 .msp-status-text--error {
-  color: #f88;
+  color: #f66;
 }
 
 /* デバッグ: 検索クエリ表示 */
 .msp-query {
   margin-top: 6px;
   font-size: 10px;
-  color: #666;
+  color: var(--msp-text-hint);
   word-break: break-all;
   line-height: 1.4;
 }
@@ -466,23 +556,23 @@
   width: 100%;
   max-width: 100%;
   padding: 5px 8px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--msp-bg-input);
+  border: 1px solid var(--msp-border-input);
   border-radius: 5px;
-  color: #eee;
+  color: var(--msp-text-input);
   font-size: 12px;
   font-family: inherit;
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, background 0.15s;
 }
 
 .msp-keyword-input::placeholder {
-  color: #555;
+  color: var(--msp-placeholder);
 }
 
 .msp-keyword-input:focus {
-  border-color: rgba(255, 255, 255, 0.4);
-  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--msp-border-input-focus);
+  background: var(--msp-bg-input-focus);
 }
 
 /* 投稿者フィルタ行 */
@@ -497,32 +587,32 @@
   flex: 1;
   min-width: 0;
   padding: 5px 8px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--msp-bg-input);
+  border: 1px solid var(--msp-border-input);
   border-radius: 5px;
-  color: #eee;
+  color: var(--msp-text-input);
   font-size: 12px;
   font-family: inherit;
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, background 0.15s;
 }
 
 .msp-channel-input::placeholder {
-  color: #555;
+  color: var(--msp-placeholder);
 }
 
 .msp-channel-input:focus {
-  border-color: rgba(255, 255, 255, 0.4);
-  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--msp-border-input-focus);
+  background: var(--msp-bg-input-focus);
 }
 
 .msp-channel-mode-btn {
   flex-shrink: 0;
   padding: 4px 7px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--msp-border-input);
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #bbb;
+  background: var(--msp-bg-input);
+  color: var(--msp-text-sub);
   font-size: 10px;
   font-family: inherit;
   cursor: pointer;
@@ -531,13 +621,13 @@
 }
 
 .msp-channel-mode-btn:hover {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
+  background: var(--msp-bg-btn-hover);
+  color: var(--msp-text);
 }
 
 .msp-channel-mode-btn[data-mode="exact"] {
-  border-color: rgba(216, 121, 80, 0.6);
-  color: #d87950;
+  border-color: var(--msp-exact-border);
+  color: var(--msp-exact-color);
 }
 
 /* スキャンボタン */
@@ -546,8 +636,8 @@
   padding: 6px 10px;
   border: none;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.12);
-  color: #eee;
+  background: var(--msp-bg-btn);
+  color: var(--msp-text-btn);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -558,7 +648,7 @@
 }
 
 .msp-scan-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--msp-bg-btn-hover);
 }
 
 .msp-scan-btn:disabled {
@@ -580,7 +670,7 @@
   justify-content: space-between;
   gap: 4px;
   padding: 4px 2px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--msp-row-border);
 }
 
 .msp-list-row__name {
@@ -589,24 +679,24 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  color: #ddd;
+  color: var(--msp-text-name);
 }
 
 .msp-list-row__name--clickable {
   cursor: pointer;
   text-decoration: underline;
-  text-decoration-color: rgba(255, 255, 255, 0.3);
+  text-decoration-color: var(--msp-underline);
   text-underline-offset: 2px;
 }
 
 .msp-list-row__name--clickable:hover {
-  color: #fff;
-  text-decoration-color: rgba(255, 255, 255, 0.7);
+  color: var(--msp-text);
+  text-decoration-color: var(--msp-underline-hover);
 }
 
 .msp-list-row__scanning {
   font-size: 11px;
-  color: #888;
+  color: var(--msp-text-label);
   flex-shrink: 0;
 }
 
@@ -640,5 +730,42 @@
 
 .msp-badge-btn--videos {
   background: #cc0000;
+}
+
+/* 投稿者プリセットタグ */
+.msp-channel-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.msp-channel-presets:empty {
+  display: none;
+}
+
+.msp-preset-tag {
+  padding: 2px 8px;
+  border: 1px solid var(--msp-border-input);
+  border-radius: 10px;
+  background: var(--msp-bg-input);
+  color: var(--msp-text-sub);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.msp-preset-tag:hover {
+  background: var(--msp-bg-btn-hover);
+  color: var(--msp-text);
+}
+
+.msp-preset-tag--active {
+  border-color: var(--msp-exact-border);
+  background: var(--msp-bg-btn);
+  color: var(--msp-exact-color);
+  font-weight: 600;
 }
 

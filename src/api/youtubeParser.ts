@@ -155,16 +155,22 @@ function matchesPlaceName(
 
   if (!nameMatch && !tokenMatch) return false
 
-  // 店名が短い（4文字以下）場合は地域名 or カテゴリとのAND条件を追加
-  // 「自由気まま」「さくら」など一般語で誤ヒットを防ぐ
-  // relaxed=true（投稿者フィルタON or listScanner 呼び出し）の場合はスキップ
-  if (!relaxed && normPlace.length <= 4) {
-    const normArea = normalize(areaName)
-    const normCat = normalize(category)
-    const hasContext =
-      (normArea.length > 0 && normTitle.includes(normArea)) ||
-      (normCat.length > 0 && normTitle.includes(normCat))
-    if (!hasContext) return false
+  // 店名が短い（4文字以下）場合は誤ヒット対策:
+  //   - relaxed=false（詳細画面など地域名あり）: 地域名 or カテゴリとの AND 条件
+  //   - relaxed=true（listScanner など地域名なし）: 店名の完全一致のみ許可（語幹マッチは除外）
+  //     完全一致 = normTitle.includes(normPlace)
+  if (normPlace.length <= 4) {
+    if (!relaxed) {
+      const normArea = normalize(areaName)
+      const normCat = normalize(category)
+      const hasContext =
+        (normArea.length > 0 && normTitle.includes(normArea)) ||
+        (normCat.length > 0 && normTitle.includes(normCat))
+      if (!hasContext) return false
+    } else {
+      // relaxed=true でも短い店名は完全一致のみ（語幹マッチや tokenMatch だけでは通さない）
+      if (!normTitle.includes(normPlace)) return false
+    }
   }
 
   return true

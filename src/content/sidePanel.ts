@@ -45,6 +45,7 @@ type PlayerState = { top: number; left: number; width: number; snapLeft: number 
 export class SidePanel {
   private el: HTMLElement
   private isOpen = true
+  private theme: 'dark' | 'light' = 'dark'
   private currentPlayer: VideoPlayer | null = null
   private currentPlaceEl: HTMLElement
   private listEl: HTMLElement
@@ -52,6 +53,7 @@ export class SidePanel {
   private keywordInput: HTMLInputElement
   private channelInput: HTMLInputElement
   private channelModeBtn: HTMLButtonElement
+  private presetEl: HTMLElement
   private onScanRequest: (() => void) | null = null
   private onScanStop: (() => void) | null = null
   private onKeywordChange: ((kw: string) => void) | null = null
@@ -73,6 +75,7 @@ export class SidePanel {
     this.keywordInput = this.el.querySelector('.msp-keyword-input')!
     this.channelInput = this.el.querySelector('.msp-channel-input')!
     this.channelModeBtn = this.el.querySelector('.msp-channel-mode-btn')!
+    this.presetEl = this.el.querySelector('.msp-channel-presets')!
     this.mount()
     // Maps のナビゲーションで body から外れたら即 re-mount する
     // subtree: true で body 自体の置き換えも検知
@@ -98,6 +101,15 @@ export class SidePanel {
   // ─────────────────────────────────────────────
   // パブリック API
   // ─────────────────────────────────────────────
+
+  /** パネルの root 要素を返す（MutationObserver の除外用） */
+  getElement(): HTMLElement { return this.el }
+
+  /** テーマを適用する（storage からの初期化用） */
+  setTheme(theme: 'dark' | 'light'): void {
+    this.theme = theme
+    this.applyTheme()
+  }
 
   /** スキャンボタンのコールバックを登録する */
   onScan(start: () => void, stop: () => void): void {
@@ -136,6 +148,39 @@ export class SidePanel {
     this.channelInput.value = f.text
     this.channelModeBtn.textContent = f.mode === 'exact' ? '完全一致' : '部分一致'
     this.channelModeBtn.dataset.mode = f.mode
+    this.updatePresetActive()
+  }
+
+  /** 投稿者プリセットを設定してタグUIを描画する */
+  setChannelPresets(presets: string[]): void {
+    this.presetEl.innerHTML = ''
+    for (const name of presets) {
+      const tag = document.createElement('button')
+      tag.type = 'button'
+      tag.className = 'msp-preset-tag'
+      tag.textContent = name
+      tag.dataset.preset = name
+      tag.addEventListener('click', () => {
+        // 同じプリセットを再クリックしたらフィルタ解除
+        const isSame = this.channelFilter.text === name
+        const next: ChannelFilter = isSame
+          ? { text: '', mode: this.channelFilter.mode }
+          : { text: name, mode: this.channelFilter.mode }
+        this.channelFilter = next
+        this.channelInput.value = next.text
+        this.updatePresetActive()
+        this.onChannelFilterChange?.(this.getChannelFilter())
+      })
+      this.presetEl.appendChild(tag)
+    }
+    this.updatePresetActive()
+  }
+
+  private updatePresetActive(): void {
+    const current = this.channelFilter.text.trim()
+    this.presetEl.querySelectorAll<HTMLButtonElement>('.msp-preset-tag').forEach(tag => {
+      tag.classList.toggle('msp-preset-tag--active', tag.dataset.preset === current)
+    })
   }
 
   /** 現在の店舗セクションを更新する */
@@ -201,6 +246,33 @@ export class SidePanel {
     if (state.query) el.appendChild(this.makeQueryEl(state.query))
   }
 
+  /** 現在パネルに表示されているリストアイテムの名前セットを返す */
+  getListItemNames(): Set<string> {
+    const names = new Set<string>()
+    this.listEl.querySelectorAll<HTMLElement>('.msp-list-row[data-name]').forEach(row => {
+      if (row.dataset.name) names.add(row.dataset.name)
+    })
+    return names
+  }
+
+  /**
+   * 新しい検索結果向けにリストをリセットする。
+   * keepNames に含まれる名前の行は残し、それ以外は削除する。
+   * keepNames が空なら全消しして「スキャン中…」ヒントを表示する。
+   */
+  resetListForNewSearch(keepNames: Set<string>): void {
+    // keepNames にない行を削除
+    this.listEl.querySelectorAll<HTMLElement>('.msp-list-row[data-name]').forEach(row => {
+      if (!keepNames.has(row.dataset.name ?? '')) row.remove()
+    })
+    // 残った行がなければヒントを表示
+    if (this.listEl.querySelectorAll('.msp-list-row').length === 0) {
+      this.listEl.innerHTML = '<p class="msp-hint">スキャン中…</p>'
+    }
+    this.scanBtn.textContent = '▶ リストをスキャン'
+    this.scanBtn.disabled = false
+  }
+
   /** リストをクリアして「スキャン待機」状態にする */
   clearList(): void {
     this.listEl.innerHTML = '<p class="msp-hint">スキャン中…</p>'
@@ -208,8 +280,14 @@ export class SidePanel {
     this.scanBtn.disabled = false
   }
 
-  /** リストアイテムを追加する */
+  /** リストアイテムを追加する（同名行が既にあれば更新する） */
   addListItem(item: ListItem): void {
+    // 既存行があれば更新して終わり（検索し直しで引き継いだ行の重複追加を防ぐ）
+    const existing = this.listEl.querySelector(`[data-name="${CSS.escape(item.name)}"]`) as HTMLElement | null
+    if (existing) {
+      this.renderListRow(existing, item)
+      return
+    }
     // ヒントテキストがあれば消す
     this.listEl.querySelector('.msp-hint')?.remove()
 
@@ -332,6 +410,16 @@ export class SidePanel {
     return btn
   }
 
+  private applyTheme(): void {
+    if (this.theme === 'light') {
+      this.el.classList.add('msp--light')
+    } else {
+      this.el.classList.remove('msp--light')
+    }
+    const btn = this.el.querySelector('.msp-theme-btn') as HTMLButtonElement | null
+    if (btn) btn.title = this.theme === 'light' ? 'ダークテーマに切り替え' : 'ライトテーマに切り替え'
+  }
+
   private createPanelDOM(): HTMLElement {
     const panel = document.createElement('div')
     panel.id = PANEL_ID
@@ -340,6 +428,7 @@ export class SidePanel {
     panel.innerHTML = `
       <div class="msp-header">
         <span class="msp-header__title">🎬 mapshort</span>
+        <button class="msp-theme-btn" type="button" title="ライトテーマに切り替え">☀</button>
         <button class="msp-header__toggle" type="button" title="パネルを折りたたむ">◀</button>
       </div>
 
@@ -367,6 +456,7 @@ export class SidePanel {
             />
             <button class="msp-channel-mode-btn" type="button" data-mode="partial">部分一致</button>
           </div>
+          <div class="msp-channel-presets"></div>
         </section>
 
         <section class="msp-section">
@@ -385,6 +475,14 @@ export class SidePanel {
         </section>
       </div>
     `
+
+    // テーマ切り替えボタン
+    const themeBtn = panel.querySelector('.msp-theme-btn') as HTMLButtonElement
+    themeBtn.addEventListener('click', () => {
+      this.theme = this.theme === 'dark' ? 'light' : 'dark'
+      this.applyTheme()
+      chrome.storage.sync.set({ theme: this.theme })
+    })
 
     // トグルボタン
     const toggle = panel.querySelector('.msp-header__toggle') as HTMLButtonElement

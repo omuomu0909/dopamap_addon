@@ -4,6 +4,48 @@
  */
 
 /**
+ * Google Maps の検索 URL（/maps/search/...）から検索クエリを取り出し、
+ * 地域名とカテゴリを推定して返す。
+ *
+ * 例: "渋谷 居酒屋" → { areaName: "渋谷", category: "居酒屋" }
+ * 例: "新宿区 ラーメン 店" → { areaName: "新宿", category: "ラーメン" }
+ */
+export function extractSearchContext(url: string = location.href): { areaName: string; category: string } {
+  let queryText = ''
+  try {
+    const u = new URL(url)
+    // /maps/search/<query> パターン
+    const m = u.pathname.match(/\/maps\/search\/([^/]+)/)
+    if (m) {
+      queryText = decodeURIComponent(m[1]).replace(/\+/g, ' ')
+    } else {
+      // ?q= or ?query= パラメーター
+      queryText = u.searchParams.get('q') ?? u.searchParams.get('query') ?? ''
+    }
+  } catch {
+    // ignore
+  }
+  if (!queryText) return { areaName: '', category: '' }
+
+  // 地域名: 都道府県・区・市・町 を含むトークンを探す
+  let areaName = ''
+  const areaM = queryText.match(/(東京|大阪|京都|北海道|[^\s\d〒ー－−\-]{2,4})[都道府県区市町村]/)
+  if (areaM) {
+    areaName = areaM[1]
+  } else {
+    // 都道府県字がなくても最初のトークンを地域名候補にする（例: "渋谷 居酒屋"）
+    const first = queryText.split(/[\s+　]/)[0]
+    if (first && first.length >= 2 && first.length <= 5) areaName = first
+  }
+
+  // カテゴリ: 業態語を含むトークンを探す
+  const catM = queryText.match(/(ラーメン|居酒屋|焼肉|寿司|すし|カフェ|喫茶|パン|カレー|そば|うどん|天ぷら|焼き鳥|焼鳥|しゃぶしゃぶ|中華|イタリアン|フレンチ|バー|バル|ビストロ|定食|丼|ピザ|バーガー|スイーツ|レストラン|食堂|食事|ダイニング)/)
+  const category = catM?.[1] ?? ''
+
+  return { areaName, category }
+}
+
+/**
  * 現在の URL パラメーター・パスから Place ID を取得する。
  *
  * Google Maps の URL パターン例:
