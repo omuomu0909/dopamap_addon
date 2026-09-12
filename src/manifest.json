@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "mapshort — 地図でショート動画",
+  "name": "dopamap: 地図上ですぐ動画を見よう！",
   "version": "1.0.0",
-  "description": "Google Maps上の飲食店に関連するYouTube Shortsをマップ上で再生します",
+  "description": "Google Maps上の飲食店に関連するYouTube動画をマップ上で再生します",
   "permissions": [
     "storage",
     "activeTab",

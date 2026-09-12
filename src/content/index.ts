@@ -43,19 +43,23 @@ async function loadSettings(): Promise<{
   maxResults: number
   scanInterval: number
   pollInterval: number
+  shortWidth: number
+  landscapeWidth: number
   theme: 'dark' | 'light'
   channelPresets: string[]
 }> {
   return new Promise((resolve) => {
-    chrome.storage.sync.get(['extraKeyword', 'channelFilter', 'autoScan', 'maxResults', 'scanInterval', 'pollInterval', 'theme', 'channelPresets'], (result) => {
+    chrome.storage.sync.get(['extraKeyword', 'channelFilter', 'autoScan', 'maxResults', 'scanInterval', 'pollInterval', 'shortWidth', 'landscapeWidth', 'theme', 'channelPresets'], (result) => {
       resolve({
-        extraKeyword:  (result['extraKeyword']  as string)  ?? '',
-        channelFilter: (result['channelFilter'] as import('./sidePanel').ChannelFilter) ?? { text: '', mode: 'partial' },
-        autoScan:      result['autoScan']   !== false,
-        maxResults:    (result['maxResults']   as number)   ?? 10,
-        scanInterval:  (result['scanInterval'] as number)   ?? 600,
-        pollInterval:  (result['pollInterval'] as number)   ?? 500,
-        theme:         (result['theme'] as 'dark' | 'light') ?? 'dark',
+        extraKeyword:   (result['extraKeyword']   as string)  ?? '',
+        channelFilter:  (result['channelFilter']  as import('./sidePanel').ChannelFilter) ?? { text: '', mode: 'partial' },
+        autoScan:       result['autoScan']  !== false,
+        maxResults:     (result['maxResults']     as number)  ?? 10,
+        scanInterval:   (result['scanInterval']   as number)  ?? 600,
+        pollInterval:   (result['pollInterval']   as number)  ?? 100,
+        shortWidth:     (result['shortWidth']     as number)  ?? 420,
+        landscapeWidth: (result['landscapeWidth'] as number)  ?? 960,
+        theme:          (result['theme'] as 'dark' | 'light') ?? 'light',
         channelPresets: (result['channelPresets'] as string[]) ?? [],
       })
     })
@@ -69,16 +73,22 @@ async function main(): Promise<void> {
   const panel = new SidePanel()
 
   // storage の初期値をパネルに反映
-  const { extraKeyword: initialKw, channelFilter: initialCf, autoScan: initialAutoScan, maxResults: initialMaxResults, scanInterval: initialScanInterval, pollInterval: initialPollInterval, theme: initialTheme, channelPresets: initialPresets } = await loadSettings()
+  const { extraKeyword: initialKw, channelFilter: initialCf, autoScan: initialAutoScan, maxResults: initialMaxResults, scanInterval: initialScanInterval, pollInterval: initialPollInterval, shortWidth: initialShortWidth, landscapeWidth: initialLandscapeWidth, theme: initialTheme, channelPresets: initialPresets } = await loadSettings()
   panel.setExtraKeyword(initialKw)
   panel.setChannelFilter(initialCf)
+  panel.setShortWidth(initialShortWidth)
+  panel.setLandscapeWidth(initialLandscapeWidth)
   panel.setTheme(initialTheme)
   panel.setChannelPresets(initialPresets)
 
-  // storage の変更を監視してプリセットをリアルタイム更新
+  // storage の変更を監視してプリセット・テーマをリアルタイム更新
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'sync' && changes['channelPresets']) {
+    if (area !== 'sync') return
+    if (changes['channelPresets']) {
       panel.setChannelPresets((changes['channelPresets'].newValue as string[]) ?? [])
+    }
+    if (changes['theme']) {
+      panel.setTheme((changes['theme'].newValue as 'dark' | 'light') ?? 'light')
     }
   })
 

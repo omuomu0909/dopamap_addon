@@ -45,7 +45,7 @@ type PlayerState = { top: number; left: number; width: number; snapLeft: number 
 export class SidePanel {
   private el: HTMLElement
   private isOpen = true
-  private theme: 'dark' | 'light' = 'dark'
+  private theme: 'dark' | 'light' = 'light'
   private currentPlayer: VideoPlayer | null = null
   private currentPlaceEl: HTMLElement
   private listEl: HTMLElement
@@ -60,6 +60,10 @@ export class SidePanel {
   private onChannelFilterChange: ((f: ChannelFilter) => void) | null = null
   private channelFilter: ChannelFilter = { text: '', mode: 'partial' }
   private domWatcher: MutationObserver
+  /** ショート動画のデフォルト幅 */
+  private shortWidth     = 420
+  /** 通常動画のデフォルト幅 */
+  private landscapeWidth = 960
   /** リスト再生ボタンで動画を起動した直後は destroyPlayer を無視する */
   private keepPlayerUntil = 0
   /** 縦動画（Shorts）の最終位置・サイズ */
@@ -104,6 +108,16 @@ export class SidePanel {
 
   /** パネルの root 要素を返す（MutationObserver の除外用） */
   getElement(): HTMLElement { return this.el }
+
+  /** ショート動画のデフォルト幅を設定する（storage からの初期化用） */
+  setShortWidth(w: number): void {
+    this.shortWidth = w
+  }
+
+  /** 通常動画のデフォルト幅を設定する（storage からの初期化用） */
+  setLandscapeWidth(w: number): void {
+    this.landscapeWidth = w
+  }
 
   /** テーマを適用する（storage からの初期化用） */
   setTheme(theme: 'dark' | 'light'): void {
@@ -345,7 +359,7 @@ export class SidePanel {
     }
 
     this.currentPlayer?.destroy()
-    this.currentPlayer = new VideoPlayer(clips, name, this.el, inheritState)
+    this.currentPlayer = new VideoPlayer(clips, name, this.el, inheritState, this.shortWidth, this.landscapeWidth)
 
     // リスト再生ボタン経由の場合、直後の destroyPlayer 呼び出しを 1 秒間ガード
     if (fromList) this.keepPlayerUntil = Date.now() + 1000
@@ -416,8 +430,6 @@ export class SidePanel {
     } else {
       this.el.classList.remove('msp--light')
     }
-    const btn = this.el.querySelector('.msp-theme-btn') as HTMLButtonElement | null
-    if (btn) btn.title = this.theme === 'light' ? 'ダークテーマに切り替え' : 'ライトテーマに切り替え'
   }
 
   private createPanelDOM(): HTMLElement {
@@ -427,8 +439,7 @@ export class SidePanel {
 
     panel.innerHTML = `
       <div class="msp-header">
-        <span class="msp-header__title">🎬 mapshort</span>
-        <button class="msp-theme-btn" type="button" title="ライトテーマに切り替え">☀</button>
+        <span class="msp-header__title">🎬 dopamap</span>
         <button class="msp-header__toggle" type="button" title="パネルを折りたたむ">◀</button>
       </div>
 
@@ -475,14 +486,6 @@ export class SidePanel {
         </section>
       </div>
     `
-
-    // テーマ切り替えボタン
-    const themeBtn = panel.querySelector('.msp-theme-btn') as HTMLButtonElement
-    themeBtn.addEventListener('click', () => {
-      this.theme = this.theme === 'dark' ? 'light' : 'dark'
-      this.applyTheme()
-      chrome.storage.sync.set({ theme: this.theme })
-    })
 
     // トグルボタン
     const toggle = panel.querySelector('.msp-header__toggle') as HTMLButtonElement

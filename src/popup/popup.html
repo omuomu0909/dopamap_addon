@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>mapshort 設定</title>
+  <title>dopamap 設定</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -302,8 +302,8 @@
 </head>
 <body>
   <div class="header">
-    <img src="../icons/icon48.png" alt="mapshort" />
-    <h1>mapshort</h1>
+    <img src="../icons/icon48.png" alt="dopamap" />
+    <h1>dopamap</h1>
   </div>
 
   <div class="body">
@@ -381,26 +381,32 @@
       <label for="poll-interval">検索し直し検知間隔</label>
       <div class="slider-row">
         <input type="range" id="poll-interval" min="10" max="3000" step="10" />
-        <span class="slider-value" id="poll-interval-value">500 ms</span>
+        <span class="slider-value" id="poll-interval-value">100 ms</span>
       </div>
       <div style="font-size:11px;color:#aaa;margin-top:4px;">
         ⚠ 50ms 以下は CPU 負荷が高くなります。10ms は最速ですが Maps が重くなる場合があります
       </div>
     </div>
 
-    <div class="divider"></div>
-
-    <!-- 追加キーワード -->
+    <!-- ショート動画デフォルトサイズ -->
     <div class="field">
-      <label for="extra-keyword">追加キーワード（任意）</label>
-      <input
-        type="text"
-        id="extra-keyword"
-        placeholder="例: vlog  食べログ  行ってみた"
-        autocomplete="off"
-        spellcheck="false"
-      />
+      <label for="short-width">ショート動画のデフォルト幅</label>
+      <div class="slider-row">
+        <input type="range" id="short-width" min="200" max="800" step="10" />
+        <span class="slider-value" id="short-width-value">420 px</span>
+      </div>
     </div>
+
+    <!-- 通常動画デフォルトサイズ -->
+    <div class="field">
+      <label for="landscape-width">通常動画のデフォルト幅</label>
+      <div class="slider-row">
+        <input type="range" id="landscape-width" min="400" max="1600" step="10" />
+        <span class="slider-value" id="landscape-width-value">960 px</span>
+      </div>
+    </div>
+
+    <div class="divider"></div>
 
     <button class="btn btn-primary" id="btn-save">保存</button>
 

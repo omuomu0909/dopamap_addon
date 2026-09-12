@@ -26,10 +26,10 @@ export class VideoPlayer {
   private idx: number = -1
   private pos = { top: 16, left: Math.max(0, window.innerWidth - 576) }
   private width = 420
-  /** 縦動画のデフォルト幅 */
-  private static readonly WIDTH_PORTRAIT  = 420
-  /** 横動画のデフォルト幅 */
-  private static readonly WIDTH_LANDSCAPE = 960
+  /** 縦動画のデフォルト幅（storage から上書き可能） */
+  private widthPortrait  = 420
+  /** 横動画のデフォルト幅（storage から上書き可能） */
+  private widthLandscape = 960
   /** パネル左端の X 座標（幅変更時に left を追従させるため保存） */
   private snapLeft: number | null = null
   private isDragging = false
@@ -55,7 +55,11 @@ export class VideoPlayer {
     restaurantName: string,
     panelEl?: Element,
     inheritState?: { top: number; left: number; width: number; snapLeft: number | null },
+    shortWidth?: number,
+    landscapeWidth?: number,
   ) {
+    if (shortWidth     != null) this.widthPortrait  = shortWidth
+    if (landscapeWidth != null) this.widthLandscape = landscapeWidth
     if (inheritState) {
       // 既存プレイヤーの位置・幅を引き継ぐ
       this.pos.top   = inheritState.top
@@ -135,7 +139,6 @@ export class VideoPlayer {
     const iframe = document.createElement('iframe')
     iframe.title = 'YouTube player'
     iframe.setAttribute('frameborder', '0')
-    iframe.allowFullscreen = true
     iframe.allow = 'autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope'
     iframe.setAttribute('allowtransparency', 'true')
 
@@ -207,9 +210,7 @@ export class VideoPlayer {
     // 同じ向きのままなら現在の幅（ユーザーがリサイズした値）を維持する。
     const orientationChanged = !prevVideo || prevVideo.isShort !== video.isShort
     if (orientationChanged) {
-      this.setWidth(video.isShort
-        ? VideoPlayer.WIDTH_PORTRAIT
-        : VideoPlayer.WIDTH_LANDSCAPE)
+      this.setWidth(video.isShort ? this.widthPortrait : this.widthLandscape)
     }
   }
 

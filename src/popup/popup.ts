@@ -5,7 +5,6 @@
  * - 自動スキャン トグル
  * - 動画の最大表示件数スライダー
  * - スキャン間隔スライダー
- * - 追加キーワード入力
  * - キャッシュクリアボタン
  */
 
@@ -17,8 +16,11 @@ const scanIntervalEl = document.getElementById('scan-interval')        as HTMLIn
 const scanIntervalVal= document.getElementById('scan-interval-value')  as HTMLSpanElement
 const pollIntervalEl = document.getElementById('poll-interval')        as HTMLInputElement
 const pollIntervalVal= document.getElementById('poll-interval-value')  as HTMLSpanElement
-const extraKeywordEl = document.getElementById('extra-keyword')        as HTMLInputElement
-const saveBtnEl      = document.getElementById('btn-save')             as HTMLButtonElement
+const shortWidthEl      = document.getElementById('short-width')           as HTMLInputElement
+const shortWidthVal     = document.getElementById('short-width-value')     as HTMLSpanElement
+const landscapeWidthEl  = document.getElementById('landscape-width')       as HTMLInputElement
+const landscapeWidthVal = document.getElementById('landscape-width-value') as HTMLSpanElement
+const saveBtnEl         = document.getElementById('btn-save')              as HTMLButtonElement
 const clearBtnEl     = document.getElementById('btn-clear-cache')      as HTMLButtonElement
 const statusEl       = document.getElementById('status-msg')           as HTMLDivElement
 const themeDarkBtn   = document.getElementById('theme-dark')           as HTMLButtonElement
@@ -32,21 +34,26 @@ const presetListEl   = document.getElementById('preset-list')          as HTMLDi
 // ─────────────────────────────────────────────
 
 chrome.storage.sync.get(
-  ['enabled', 'autoScan', 'maxResults', 'scanInterval', 'pollInterval', 'extraKeyword', 'theme', 'channelPresets'],
+  ['enabled', 'autoScan', 'maxResults', 'scanInterval', 'pollInterval', 'shortWidth', 'landscapeWidth', 'theme', 'channelPresets'],
   (result) => {
     toggleEl.checked       = result['enabled']   !== false       // デフォルト true
     autoScanEl.checked     = result['autoScan']  !== false       // デフォルト true
-    const maxR             = (result['maxResults']   as number) ?? 10
-    const scanMs           = (result['scanInterval'] as number) ?? 600
-    const pollMs           = (result['pollInterval'] as number) ?? 500
+    const maxR             = (result['maxResults']      as number) ?? 10
+    const scanMs           = (result['scanInterval']    as number) ?? 600
+    const pollMs           = (result['pollInterval']    as number) ?? 100
+    const shortW           = (result['shortWidth']      as number) ?? 420
+    const landscapeW       = (result['landscapeWidth']  as number) ?? 960
     maxResultsEl.value     = String(maxR)
     maxResultsVal.textContent = `${maxR} 件`
     scanIntervalEl.value   = String(scanMs)
     scanIntervalVal.textContent = `${scanMs} ms`
     pollIntervalEl.value   = String(pollMs)
     pollIntervalVal.textContent = `${pollMs} ms`
-    extraKeywordEl.value   = (result['extraKeyword'] as string) ?? ''
-    setActiveTheme((result['theme'] as 'dark' | 'light') ?? 'dark')
+    shortWidthEl.value     = String(shortW)
+    shortWidthVal.textContent = `${shortW} px`
+    landscapeWidthEl.value = String(landscapeW)
+    landscapeWidthVal.textContent = `${landscapeW} px`
+    setActiveTheme((result['theme'] as 'dark' | 'light') ?? 'light')
     renderPresets((result['channelPresets'] as string[]) ?? [])
   },
 )
@@ -65,6 +72,14 @@ scanIntervalEl.addEventListener('input', () => {
 
 pollIntervalEl.addEventListener('input', () => {
   pollIntervalVal.textContent = `${pollIntervalEl.value} ms`
+})
+
+shortWidthEl.addEventListener('input', () => {
+  shortWidthVal.textContent = `${shortWidthEl.value} px`
+})
+
+landscapeWidthEl.addEventListener('input', () => {
+  landscapeWidthVal.textContent = `${landscapeWidthEl.value} px`
 })
 
 // ─────────────────────────────────────────────
@@ -107,12 +122,13 @@ autoScanEl.addEventListener('change', () => {
 // ─────────────────────────────────────────────
 
 saveBtnEl.addEventListener('click', () => {
-  const extraKeyword  = extraKeywordEl.value.trim()
-  const maxResults    = Number(maxResultsEl.value)
-  const scanInterval  = Number(scanIntervalEl.value)
-  const pollInterval  = Number(pollIntervalEl.value)
-  chrome.storage.sync.set({ extraKeyword, maxResults, scanInterval, pollInterval }, () => {
-    showStatus('保存しました ✓')
+  const maxResults     = Number(maxResultsEl.value)
+  const scanInterval   = Number(scanIntervalEl.value)
+  const pollInterval   = Number(pollIntervalEl.value)
+  const shortWidth     = Number(shortWidthEl.value)
+  const landscapeWidth = Number(landscapeWidthEl.value)
+  chrome.storage.sync.set({ maxResults, scanInterval, pollInterval, shortWidth, landscapeWidth }, () => {
+    window.close()
   })
 })
 
